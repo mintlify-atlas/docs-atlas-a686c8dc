@@ -1,0 +1,362 @@
+---
+title: Update Key Settings
+description: Update key properties in response to plan changes, subscription updates, or account status changes
+---
+
+Update key properties in response to plan changes, subscription updates, or account status changes.
+
+Use this for user upgrades/downgrades, role modifications, or administrative changes. Supports partial updates - only specify fields you want to change. Set fields to null to clear them.
+
+**Important**: Permissions and roles are replaced entirely. Use dedicated add/remove endpoints for incremental changes.
+
+## Required Permissions
+
+Your root key must have one of the following permissions:
+- `api.*.update_key` (to update keys in any API)
+- `api.<api_id>.update_key` (to update keys in a specific API)
+
+## Side Effects
+
+If you specify an `externalId` that doesn't exist, a new identity will be automatically created and linked to the key. Permission updates will auto-create any permissions that don't exist in your workspace. Changes take effect immediately but may take up to 30 seconds to propagate to all edge regions due to cache invalidation.
+
+## Request
+
+<ParamField body="keyId" type="string" required>
+  Specifies which key to update using the database identifier returned from `createKey`. Do not confuse this with the actual API key string that users include in requests.
+  
+  **Pattern**: `^[a-zA-Z0-9_]+$`
+  
+  **Example**: `key_2cGKbMxRyIzhCxo1Idjz8q`
+</ParamField>
+
+<ParamField body="name" type="string | null">
+  Sets a human-readable name for internal organization and identification. Omitting this field leaves the current name unchanged, while setting null removes it entirely.
+  
+  Avoid generic names like "API Key" when managing multiple keys per user or service.
+  
+  **Length**: 1-255 characters
+  
+  **Example**: `Payment Service Production Key`
+</ParamField>
+
+<ParamField body="externalId" type="string | null">
+  Links this key to a user or entity in your system for ownership tracking during verification. Omitting this field preserves the current association, while setting null disconnects the key from any identity.
+  
+  Essential for user-specific analytics, billing, and key management across multiple users. Supports letters, numbers, underscores, dots, and hyphens for flexible identifier formats.
+  
+  **Length**: 1-255 characters
+  
+  **Pattern**: `^[a-zA-Z0-9_.-]+$`
+  
+  **Example**: `user_912a841d`
+</ParamField>
+
+<ParamField body="meta" type="object | null">
+  Stores arbitrary JSON metadata returned during key verification. Omitting this field preserves existing metadata, while setting null removes all metadata entirely.
+  
+  Avoid storing sensitive data here as it's returned in verification responses. Large metadata objects increase verification latency and should stay under 10KB total size.
+  
+  **Example**:
+  ```json
+  {
+    "plan": "enterprise",
+    "limits": {
+      "storage": "500GB",
+      "compute": "1000 minutes/month"
+    },
+    "features": ["analytics", "exports", "webhooks"],
+    "billing": {
+      "cycle": "monthly",
+      "next_billing": "2024-01-15"
+    }
+  }
+  ```
+</ParamField>
+
+<ParamField body="expires" type="integer | null">
+  Sets when this key automatically expires as a Unix timestamp in milliseconds. Verification fails with `code=EXPIRED` immediately after this time passes.
+  
+  Omitting this field preserves the current expiration, while setting null makes the key permanent. Avoid setting timestamps in the past as they immediately invalidate the key.
+  
+  **Example**: `1704067200000`
+</ParamField>
+
+<ParamField body="credits" type="object | null">
+  Controls usage-based limits for this key through credit consumption. Omitting this field preserves current credit settings, while setting null enables unlimited usage.
+  
+  Cannot configure refill settings when credits is null, and refillDay requires monthly interval.
+  
+  <ParamField body="remaining" type="integer">
+    The number of credits available for this key.
+  </ParamField>
+  
+  <ParamField body="refill" type="object">
+    Configuration for automatic credit refills.
+    
+    <ParamField body="interval" type="string">
+      How often credits are refilled. Options: `daily`, `monthly`
+    </ParamField>
+    
+    <ParamField body="amount" type="integer">
+      Number of credits to add on each refill.
+    </ParamField>
+    
+    <ParamField body="refillDay" type="integer">
+      Day of the month for monthly refills (1-31). Only applicable when interval is `monthly`.
+    </ParamField>
+  </ParamField>
+</ParamField>
+
+<ParamField body="ratelimits" type="array | null">
+  Defines time-based rate limits that protect against abuse by controlling request frequency. Omitting this field preserves existing rate limits, while setting null removes all rate limits.
+  
+  Unlike credits which track total usage, rate limits reset automatically after each window expires. Multiple rate limits can control different operation types with separate thresholds and windows.
+</ParamField>
+
+<ParamField body="enabled" type="boolean">
+  Controls whether the key is currently active for verification requests. When set to `false`, all verification attempts fail with `code=DISABLED` regardless of other settings.
+  
+  Omitting this field preserves the current enabled status. Useful for temporarily suspending access during billing issues, security incidents, or maintenance windows without losing key configuration.
+</ParamField>
+
+<ParamField body="roles" type="array">
+  Assigns existing roles to this key for permission management through role-based access control. Roles must already exist in your workspace before assignment.
+  
+  During verification, all permissions from assigned roles are checked against requested permissions. Roles provide a convenient way to group permissions and apply consistent access patterns across multiple keys.
+  
+  **Example**: `["api_admin", "billing_reader"]`
+</ParamField>
+
+<ParamField body="permissions" type="array">
+  Grants specific permissions directly to this key without requiring role membership. Wildcard permissions like `documents.*` grant access to all sub-permissions including `documents.read` and `documents.write`.
+  
+  Direct permissions supplement any permissions inherited from assigned roles.
+  
+  **Example**: `["documents.read", "documents.write", "settings.view"]`
+</ParamField>
+
+## Response
+
+The response contains an empty data object on success.
+
+<ResponseField name="data" type="object">
+  Empty object indicating successful update.
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.updateKey \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_1234abcd",
+    "enabled": false,
+    "meta": {
+      "status": "suspended",
+      "reason": "payment_failed"
+    }
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+await unkey.keys.update({
+  keyId: "key_1234abcd",
+  enabled: false,
+  meta: {
+    status: "suspended",
+    reason: "payment_failed",
+  },
+});
+
+console.log("Key suspended successfully");
+```
+
+```python Python
+import os
+import requests
+
+response = requests.post(
+    "https://api.unkey.com/v2/keys.updateKey",
+    headers={
+        "Authorization": f"Bearer {os.environ['UNKEY_ROOT_KEY']}",
+        "Content-Type": "application/json"
+    },
+    json={
+        "keyId": "key_1234abcd",
+        "enabled": False,
+        "meta": {
+            "status": "suspended",
+            "reason": "payment_failed"
+        }
+    }
+)
+
+if response.status_code == 200:
+    print("Key suspended successfully")
+```
+
+```go Go
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/unkeyed/unkey-go"
+	"github.com/unkeyed/unkey-go/models/components"
+)
+
+func main() {
+	uk := unkey.New(
+		unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+	)
+
+	ctx := context.Background()
+	enabled := false
+	_, err := uk.Keys.UpdateKey(ctx, &components.V2KeysUpdateKeyRequestBody{
+		KeyID:   "key_1234abcd",
+		Enabled: &enabled,
+		Meta: map[string]interface{}{
+			"status": "suspended",
+			"reason": "payment_failed",
+		},
+	})
+
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println("Key suspended successfully")
+}
+```
+</CodeGroup>
+
+### Plan Upgrade
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.updateKey \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_1234abcd",
+    "meta": {
+      "plan": "paid",
+      "billingCycle": "monthly",
+      "upgradeDate": "2024-01-15T10:30:00Z"
+    },
+    "credits": {
+      "remaining": 10000,
+      "refill": {
+        "interval": "monthly",
+        "amount": 10000,
+        "refillDay": 15
+      }
+    },
+    "ratelimits": [{
+      "name": "requests",
+      "limit": 1000,
+      "duration": 60000,
+      "autoApply": true
+    }]
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+await unkey.keys.update({
+  keyId: "key_1234abcd",
+  meta: {
+    plan: "paid",
+    billingCycle: "monthly",
+    upgradeDate: "2024-01-15T10:30:00Z",
+  },
+  credits: {
+    remaining: 10000,
+    refill: {
+      interval: "monthly",
+      amount: 10000,
+      refillDay: 15,
+    },
+  },
+  ratelimits: [{
+    name: "requests",
+    limit: 1000,
+    duration: 60000,
+    autoApply: true,
+  }],
+});
+
+console.log("Key upgraded to paid plan");
+```
+</CodeGroup>
+
+### Update Permissions
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.updateKey \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_9876wxyz",
+    "externalId": "user_admin_456",
+    "meta": {
+      "role": "admin",
+      "promotedDate": "2024-01-15T10:30:00Z"
+    },
+    "permissions": [
+      "users.read",
+      "users.write",
+      "admin.dashboard",
+      "billing.view"
+    ],
+    "roles": ["admin"]
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+await unkey.keys.update({
+  keyId: "key_9876wxyz",
+  externalId: "user_admin_456",
+  meta: {
+    role: "admin",
+    promotedDate: "2024-01-15T10:30:00Z",
+  },
+  permissions: [
+    "users.read",
+    "users.write",
+    "admin.dashboard",
+    "billing.view",
+  ],
+  roles: ["admin"],
+});
+
+console.log("User promoted to admin");
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_abcd1234"
+  },
+  "data": {}
+}
+```

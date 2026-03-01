@@ -1,0 +1,427 @@
+---
+title: Express.js Integration Guide
+description: Complete guide to integrating Unkey API authentication in Express applications with middleware patterns
+---
+
+## Overview
+
+This guide covers everything you need to protect your Express.js API with Unkey, including basic setup, reusable middleware, permission checks, and production-ready patterns.
+
+**What you'll learn:**
+- Quick setup with the Unkey SDK
+- Reusable middleware patterns
+- Permission-based access control
+- Rate limiting integration
+- Error handling best practices
+
+## Prerequisites
+
+- [Unkey account](https://app.unkey.com/auth/sign-up) (free)
+- [API created](https://app.unkey.com/apis) in your Unkey dashboard
+- Node.js 18+
+
+## Quick Start
+
+<Steps>
+
+<Step title="Create your Express app">
+
+```bash
+mkdir unkey-express && cd unkey-express
+npm init -y
+npm install express @unkey/api dotenv
+```
+
+</Step>
+
+<Step title="Add your root key">
+
+Get a root key from [Settings → Root Keys](https://app.unkey.com/settings/root-keys) and create a `.env` file:
+
+```bash .env
+UNKEY_ROOT_KEY="unkey_..."
+```
+
+<Warning>
+Never commit your `.env` file. Add it to `.gitignore`.
+</Warning>
+
+</Step>
+
+<Step title="Create your server">
+
+Create `index.js` with a protected route:
+
+```js index.js
+const express = require("express");
+const { verifyKey } = require("@unkey/api");
+require("dotenv").config();
+
+const app = express();
+const port = process.env.PORT || 3000;
+
+// Public route
+app.get("/", (req, res) => {
+  res.json({ message: "Welcome! Try /secret with an API key." });
+});
+
+// Protected route
+app.get("/secret", async (req, res) => {
+  // 1. Extract the key from the Authorization header
+  const authHeader = req.headers.authorization;
+  const key = authHeader?.replace("Bearer ", "");
+
+  if (!key) {
+    return res.status(401).json({ error: "Missing API key" });
+  }
+
+  // 2. Verify with Unkey
+  try {
+    const { meta, data } = await verifyKey({ key });
+
+    if (!data.valid) {
+      return res.status(401).json({ 
+        error: "Invalid API key",
+        code: data.code 
+      });
+    }
+
+    // 3. Key is valid — return protected data
+    res.json({
+      message: "Welcome to the secret route!",
+      keyId: data.keyId,
+      identity: data.identity,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Could not verify key" });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`Server running at http://localhost:${port}`);
+});
+```
+
+</Step>
+
+<Step title="Start your server">
+
+```bash
+node index.js
+```
+
+</Step>
+
+<Step title="Test it">
+
+First, create a test key in your [Unkey dashboard](https://app.unkey.com), then:
+
+```bash Test with valid key
+curl http://localhost:3000/secret \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+You should see:
+```json
+{
+  "message": "Welcome to the secret route!",
+  "keyId": "key_...",
+  "identity": null
+}
+```
+
+</Step>
+
+</Steps>
+
+## Reusable Middleware
+
+For cleaner code, extract verification into middleware:
+
+```js middleware/auth.js
+const { verifyKey } = require("@unkey/api");
+
+async function unkeyAuth(req, res, next) {
+  const key = req.headers.authorization?.replace("Bearer ", "");
+
+  if (!key) {
+    return res.status(401).json({ error: "Missing API key" });
+  }
+
+  try {
+    const { meta, data } = await verifyKey({ key });
+
+    if (!data.valid) {
+      return res.status(401).json({ error: "Invalid API key" });
+    }
+
+    // Attach key info to request for use in route handlers
+    req.unkey = data;
+    next();
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Could not verify key" });
+  }
+}
+
+module.exports = { unkeyAuth };
+```
+
+Use it on any route:
+
+```js
+const { unkeyAuth } = require("./middleware/auth");
+
+app.get("/secret", unkeyAuth, (req, res) => {
+  // req.unkey contains the verification result
+  res.json({ message: "Secret data", keyId: req.unkey.keyId });
+});
+
+app.get("/another-secret", unkeyAuth, (req, res) => {
+  res.json({ data: "More protected content" });
+});
+```
+
+## TypeScript Version
+
+For TypeScript projects:
+
+```typescript middleware/auth.ts
+import { Unkey } from "@unkey/api";
+import { Request, Response, NextFunction } from "express";
+
+const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY! });
+
+// Extend Express Request type
+declare global {
+  namespace Express {
+    interface Request {
+      unkey?: V2KeysVerifyKeyResponseData;
+    }
+  }
+}
+
+export async function unkeyAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Missing API key" });
+  }
+  
+  const apiKey = authHeader.slice(7);
+
+  const { meta, data, error } = await unkey.keys.verifyKey({
+    key: apiKey,
+  });
+
+  if (error) {
+    console.error("Unkey error:", error);
+    return res.status(503).json({ error: "Authentication service unavailable" });
+  }
+
+  if (!data.valid) {
+    const status = data.code === "RATE_LIMITED" ? 429 : 401;
+    return res.status(status).json({ error: data.code });
+  }
+
+  req.unkey = data;
+  next();
+}
+```
+
+## Rate Limit Headers
+
+Include rate limit info in response headers:
+
+```typescript middleware/auth.ts
+export async function unkeyAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Missing API key" });
+  }
+
+  const { meta, data, error } = await unkey.keys.verifyKey({
+    key: authHeader.slice(7),
+  });
+
+  if (error) {
+    return res.status(503).json({ error: "Service unavailable" });
+  }
+
+  // Add rate limit headers if available
+  if (data.ratelimits?.[0]) {
+    const rl = data.ratelimits[0];
+    res.set({
+      "X-RateLimit-Limit": rl.limit.toString(),
+      "X-RateLimit-Remaining": rl.remaining.toString(),
+      "X-RateLimit-Reset": rl.reset.toString(),
+    });
+  }
+
+  // Add remaining credits header if available
+  if (data.credits !== undefined) {
+    res.set("X-Credits-Remaining", data.credits.toString());
+  }
+
+  if (!data.valid) {
+    const status = data.code === "RATE_LIMITED" ? 429 : 401;
+    return res.status(status).json({ error: data.code });
+  }
+
+  req.unkey = data;
+  next();
+}
+```
+
+## Permission-Based Access
+
+Create middleware that requires specific permissions:
+
+```typescript middleware/permissions.ts
+import { Unkey } from "@unkey/api";
+import { Request, Response, NextFunction } from "express";
+
+const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY! });
+
+export function requirePermission(permission: string) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader?.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Missing API key" });
+    }
+
+    const { meta, data, error } = await unkey.keys.verifyKey({
+      key: authHeader.slice(7),
+      permissions: permission,
+    });
+
+    if (error) {
+      return res.status(503).json({ error: "Service unavailable" });
+    }
+
+    if (!data.valid) {
+      if (data.code === "INSUFFICIENT_PERMISSIONS") {
+        return res.status(403).json({ 
+          error: "Forbidden",
+          required: permission,
+        });
+      }
+      return res.status(401).json({ error: data.code });
+    }
+
+    req.unkey = data;
+    next();
+  };
+}
+```
+
+Use it:
+
+```typescript
+import { unkeyAuth } from "./middleware/auth";
+import { requirePermission } from "./middleware/permissions";
+
+// Anyone with a valid key
+app.get("/api/data", unkeyAuth, handler);
+
+// Only keys with "admin" permission
+app.delete("/api/users/:id", requirePermission("admin"), deleteUser);
+
+// Only keys with "billing.read" permission
+app.get("/api/invoices", requirePermission("billing.read"), getInvoices);
+```
+
+## Protect Entire Router
+
+Apply middleware to an entire router:
+
+```typescript app.ts
+import express from "express";
+import { unkeyAuth } from "./middleware/auth";
+
+const app = express();
+
+// Public routes
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+// Protected router
+const apiRouter = express.Router();
+apiRouter.use(unkeyAuth);
+
+apiRouter.get("/users", (req, res) => {
+  res.json({ users: [] });
+});
+
+apiRouter.post("/users", (req, res) => {
+  res.json({ created: true });
+});
+
+app.use("/api/v1", apiRouter);
+
+app.listen(3000);
+```
+
+## Verification Response Data
+
+After successful verification, `data` contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `valid` | `boolean` | Whether the key passed all checks |
+| `code` | `string` | Status code (`VALID`, `NOT_FOUND`, `RATE_LIMITED`, etc.) |
+| `keyId` | `string` | The key's unique identifier |
+| `name` | `string?` | Human-readable name of the key |
+| `meta` | `object?` | Custom metadata associated with the key |
+| `expires` | `number?` | Unix timestamp (in milliseconds) when the key will expire |
+| `credits` | `number?` | Remaining uses (if usage limits set) |
+| `enabled` | `boolean` | Whether the key is enabled |
+| `roles` | `string[]?` | Permissions attached to the key |
+| `permissions` | `string[]?` | Permissions attached to the key |
+| `identity` | `object?` | Identity info if `externalId` was set |
+| `ratelimits` | `object[]?` | Rate limit states (if rate limiting configured) |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Add rate limiting" icon="gauge-high" href="/apis/features/ratelimiting/overview">
+    Limit requests per key
+  </Card>
+  <Card title="Set usage limits" icon="calculator" href="/apis/features/remaining">
+    Cap total requests per key
+  </Card>
+  <Card title="Add permissions" icon="user-shield" href="/apis/features/authorization/introduction">
+    Fine-grained access control
+  </Card>
+  <Card title="SDK Reference" icon="book" href="/libraries/ts/api">
+    Full TypeScript SDK docs
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Getting 401 even with a valid key?">
+    - Ensure the key hasn't expired or been revoked
+    - Verify the `Authorization` header format: `Bearer YOUR_KEY` (note the space)
+    - Check that your root key has the `verify_key` permission
+  </Accordion>
+  
+  <Accordion title="Getting 500 errors?">
+    - Check that `UNKEY_ROOT_KEY` is set correctly in your `.env`
+    - Make sure you're calling `require("dotenv").config()` before using env vars
+    - Check the Unkey dashboard for any service issues
+  </Accordion>
+</AccordionGroup>

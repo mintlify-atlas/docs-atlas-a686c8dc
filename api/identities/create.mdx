@@ -1,0 +1,119 @@
+---
+title: 'Create Identity'
+description: 'Create an identity to group multiple API keys under a single entity'
+---
+
+## POST /v2/identities.createIdentity
+
+Create an identity to group multiple API keys under a single entity. Identities enable shared rate limits and metadata across all associated keys. Perfect for users with multiple devices, organizations with multiple API keys, or when you need unified rate limiting across different services.
+
+### Required Permissions
+
+Requires `identity.*.create_identity` permission
+
+### Request
+
+<ParamField body="externalId" type="string" required>
+  Creates an identity using your system's unique identifier for a user, organization, or entity. Must be stable and unique across your workspace - duplicate externalIds return CONFLICT errors.
+  
+  This identifier links Unkey identities to your authentication system, database records, or tenant structure. Avoid changing externalIds after creation as this breaks the link between your systems.
+  
+  - Must be 1-255 characters long
+  - Can contain letters, numbers, underscores, dots, and hyphens
+  
+  Example: `user_123`
+</ParamField>
+
+<ParamField body="meta" type="object">
+  Stores arbitrary JSON metadata returned during key verification for contextual information. Eliminates additional database lookups during verification, improving performance for stateless services.
+  
+  **Important**: Avoid storing sensitive data here as it's returned in verification responses. Large metadata objects increase verification latency and should stay under 10KB total size.
+  
+  Use this for subscription details, feature flags, user preferences, and organization information.
+  
+  - Maximum 100 properties
+  
+  Example:
+  ```json
+  {
+    "name": "Alice Smith",
+    "email": "alice@example.com",
+    "plan": "premium"
+  }
+  ```
+</ParamField>
+
+<ParamField body="ratelimits" type="array">
+  Defines shared rate limits that apply to all keys belonging to this identity. Prevents abuse by users with multiple keys by enforcing consistent limits across their entire key portfolio.
+  
+  Rate limit counters are shared across all keys with this identity, regardless of how many keys the user creates. During verification, specify which named limits to check for enforcement.
+  
+  - Maximum 50 rate limits per identity
+  
+  Each rate limit object contains:
+  - `name` - Named identifier for this rate limit
+  - `limit` - Maximum operations allowed
+  - `duration` - Time window in milliseconds
+  
+  Example:
+  ```json
+  [
+    {
+      "name": "requests",
+      "limit": 1000,
+      "duration": 60000
+    }
+  ]
+  ```
+</ParamField>
+
+### Response
+
+<ResponseField name="identityId" type="string" required>
+  The unique identifier of the created identity. Use this ID to reference the identity in subsequent operations.
+  
+  Example: `id_1234567890abcdef`
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/identities.createIdentity \
+  -H "Authorization: Bearer <your-root-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "externalId": "user_123",
+    "meta": {
+      "name": "Alice Smith",
+      "email": "alice@example.com",
+      "plan": "premium"
+    },
+    "ratelimits": [
+      {
+        "name": "requests",
+        "limit": 1000,
+        "duration": 60000
+      }
+    ]
+  }'
+```
+
+```json Response
+{
+  "meta": {
+    "requestId": "req_01H9TQPP77V5E48E9SH0BG0ZQX"
+  },
+  "data": {
+    "identityId": "id_1234567890abcdef"
+  }
+}
+```
+
+### Error Codes
+
+- `400` - Bad request (invalid parameters)
+- `401` - Unauthorized (missing or invalid root key)
+- `403` - Forbidden (insufficient permissions - requires `identity.*.create_identity`)
+- `409` - Conflict (identity with this externalId already exists)
+- `429` - Too many requests (rate limit exceeded)
+- `500` - Internal server error

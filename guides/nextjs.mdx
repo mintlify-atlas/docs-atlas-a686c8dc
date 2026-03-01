@@ -1,0 +1,411 @@
+---
+title: Next.js Integration Guide
+description: Complete guide to integrating Unkey API authentication in Next.js applications with API routes and middleware
+---
+
+## Overview
+
+This guide covers everything you need to protect your Next.js application with Unkey, including App Router API routes, Pages Router endpoints, and reusable middleware patterns.
+
+**What you'll learn:**
+- Quick setup with `@unkey/nextjs` wrapper
+- Manual verification for full control
+- Reusable middleware patterns
+- Permission-based access control
+- Best practices for production
+
+## Prerequisites
+
+- [Unkey account](https://app.unkey.com/auth/sign-up) (free)
+- [API created](https://app.unkey.com/apis) in your Unkey dashboard
+- Next.js 13+ (App Router or Pages Router)
+- Node.js 18+
+
+## Quick Start with @unkey/nextjs
+
+The fastest way to get started is with the official Next.js wrapper.
+
+<Steps>
+
+<Step title="Install the SDK">
+
+<CodeGroup>
+
+```bash npm
+npm install @unkey/nextjs
+```
+
+```bash pnpm
+pnpm add @unkey/nextjs
+```
+
+```bash yarn
+yarn add @unkey/nextjs
+```
+
+</CodeGroup>
+
+</Step>
+
+<Step title="Add your root key">
+
+Get a root key from *Settings → Root Keys* and add it to your environment:
+
+```bash .env.local
+UNKEY_ROOT_KEY="unkey_..."
+```
+
+<Warning>
+Never commit your root key. Add `.env.local` to `.gitignore`.
+</Warning>
+
+</Step>
+
+<Step title="Create a protected App Router route">
+
+```ts app/api/protected/route.ts
+import { NextRequestWithUnkeyContext, withUnkey } from "@unkey/nextjs";
+
+export const POST = withUnkey(
+  async (req: NextRequestWithUnkeyContext) => {
+    // The key has already been verified at this point
+    // Access verification details via req.unkey.data
+        
+    // Your API logic here
+    return Response.json({
+      message: "Hello!",
+      keyId: req.unkey.data.keyId,
+      // If you set an externalId when creating the key:
+      externalId: req.unkey.data.identity?.externalId,
+    });
+  },
+  { rootKey: process.env.UNKEY_ROOT_KEY! }
+);
+```
+
+<Tip>
+The `withUnkey` wrapper handles key extraction, verification, and error responses automatically. Invalid keys never reach your handler.
+</Tip>
+
+</Step>
+
+<Step title="Test it">
+
+First, create a test key in your [Unkey dashboard](https://app.unkey.com), then:
+
+```bash Test with valid key
+curl -X POST http://localhost:3000/api/protected \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+You should see:
+```json
+{
+  "message": "Hello!",
+  "keyId": "key_..."
+}
+```
+
+Now try without a key:
+```bash Test without key
+curl -X POST http://localhost:3000/api/protected
+```
+
+You'll get a `401 Unauthorized` response.
+
+</Step>
+
+</Steps>
+
+## Pages Router
+
+For Next.js Pages Router, wrap your API handler:
+
+```typescript pages/api/protected.ts
+import { withUnkey, NextRequestWithUnkeyContext } from "@unkey/nextjs";
+import { NextApiRequest, NextApiResponse } from "next";
+
+async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // Type assertion needed for Pages Router
+  const unkeyReq = req as unknown as NextRequestWithUnkeyContext;
+  
+  return res.json({
+    message: "Access granted",
+    user: unkeyReq.unkey?.data.identity?.externalId,
+  });
+}
+
+export default withUnkey(handler, { rootKey: process.env.UNKEY_ROOT_KEY! });
+```
+
+## Custom Key Extraction
+
+By default, `withUnkey` looks for a Bearer token in the `Authorization` header. Customize this:
+
+```typescript
+export const POST = withUnkey(
+  async (req) => {
+    return Response.json({ message: "Success" });
+  },
+  {
+    rootKey: process.env.UNKEY_ROOT_KEY!,
+    getKey: (req) => req.headers.get("x-api-key"),  // Custom header
+  }
+);
+```
+
+## Custom Error Handling
+
+```typescript
+export const POST = withUnkey(
+  async (req) => {
+    return Response.json({ message: "Success" });
+  },
+  {
+    rootKey: process.env.UNKEY_ROOT_KEY!,
+    handleInvalidKey: (req, result) => {
+      // result.code tells you why it failed
+      return Response.json(
+        { 
+          error: "Unauthorized",
+          reason: result.code,  // "NOT_FOUND", "EXPIRED", "RATE_LIMITED", etc.
+        },
+        { status: 401 }
+      );
+    },
+    onError: (req, error) => {
+      console.error("Unkey error:", error);
+      return Response.json(
+        { error: "Authentication service unavailable" },
+        { status: 503 }
+      );
+    },
+  }
+);
+```
+
+## Manual Verification
+
+For full control over the authentication flow:
+
+```typescript app/api/protected/route.ts
+import { Unkey } from "@unkey/api";
+import { UnkeyError } from "@unkey/api/models/errors";
+import { NextRequest, NextResponse } from "next/server";
+
+const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY! });
+
+export async function POST(req: NextRequest) {
+  // 1. Extract API key
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return NextResponse.json(
+      { error: "Missing API key" },
+      { status: 401 }
+    );
+  }
+  const apiKey = authHeader.slice(7);
+
+  // 2. Verify with Unkey
+  try {
+    const { meta, data } = await unkey.keys.verifyKey({
+      key: apiKey,
+    });
+
+    if (!data.valid) {
+      return Response.json({ error: "Invalid API key" }, { status: 401 });
+    }
+
+    // 3. Your API logic here
+    return Response.json({ data: "hello world" });
+  } catch (err) {
+    if (err instanceof UnkeyError) {
+      console.error("Unkey API Error:", {
+        statusCode: err.statusCode,
+        body: err.body,
+        message: err.message,
+      });
+      return Response.json(
+        { error: "API error occurred", details: err.message },
+        { status: err.statusCode },
+      );
+    }
+
+    console.log("Unknown error:", err);
+    return Response.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+}
+```
+
+## Reusable Middleware Pattern
+
+Create a helper for consistent auth across routes:
+
+```typescript lib/auth.ts
+import { Unkey } from "@unkey/api";
+import { UnkeyError } from "@unkey/api/models/errors";
+import { NextRequest, NextResponse } from "next/server";
+import { V2KeysVerifyKeyResponseData } from "@unkey/api/models/components";
+
+type AuthenticatedHandler = (
+  req: NextRequest,
+  auth: V2KeysVerifyKeyResponseData,
+) => Promise<NextResponse>;
+
+const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY! });
+
+export function withAuth(handler: AuthenticatedHandler) {
+  return async (req: NextRequest) => {
+    const authHeader = req.headers.get("authorization");
+
+    if (!authHeader?.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Missing API key" }, { status: 401 });
+    }
+
+    try {
+      const { meta, data } = await unkey.keys.verifyKey({
+        key: authHeader.slice(7),
+      });
+
+      if (!data.valid) {
+        return NextResponse.json({ error: data.code }, { status: 401 });
+      }
+
+      return handler(req, data);
+    } catch (error) {
+      if (error instanceof UnkeyError) {
+        return NextResponse.json(
+          { error: error.message },
+          { status: error.statusCode },
+        );
+      }
+      return NextResponse.json(
+        { error: "Service unavailable" },
+        { status: 503 },
+      );
+    }
+  };
+}
+```
+
+Use it in your routes:
+
+```typescript app/api/users/route.ts
+import { withAuth } from "@/lib/auth";
+
+export const GET = withAuth(async (req, auth) => {
+  // auth contains the full verification result
+  const users = await db.users.findMany({
+    where: { organizationId: auth.identity?.externalId },
+  });
+  
+  return Response.json({ users });
+});
+```
+
+## Permission-Based Access Control
+
+Require specific permissions for sensitive endpoints:
+
+```typescript app/api/admin/route.ts
+import { Unkey } from "@unkey/api";
+import { UnkeyError } from "@unkey/api/models/errors";
+import { NextRequest, NextResponse } from "next/server";
+
+const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY! });
+
+export async function POST(req: NextRequest) {
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return NextResponse.json(
+      { error: "Missing API key" },
+      { status: 401 }
+    );
+  }
+
+  const apiKey = authHeader.slice(7);
+
+  try {
+    const result = await unkey.keys.verifyKey({
+      key: apiKey,
+      permissions: ["admin.delete"],
+    });
+
+    if (!result.data.valid) {
+      if (result.data.code === "INSUFFICIENT_PERMISSIONS") {
+        return Response.json({ error: "Admin access required" }, { status: 403 });
+      }
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    return Response.json({ data: "hello world" });
+  } catch (err) {
+    if (err instanceof UnkeyError) {
+      console.error("Unkey API Error:", {
+        statusCode: err.statusCode,
+        body: err.body,
+        message: err.message,
+      });
+      return Response.json(
+        { error: "API error occurred", details: err.message },
+        { status: err.statusCode },
+      );
+    }
+
+    console.log("Unknown error:", err);
+    return Response.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+}
+```
+
+## Verification Response Data
+
+After verification, `req.unkey.data` (or `data` in manual mode) contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `valid` | `boolean` | Whether the key passed all checks |
+| `code` | `string` | Status code (`VALID`, `NOT_FOUND`, `RATE_LIMITED`, etc.) |
+| `keyId` | `string` | The key's unique identifier |
+| `name` | `string?` | Human-readable name of the key |
+| `meta` | `object?` | Custom metadata associated with the key |
+| `expires` | `number?` | Unix timestamp (in milliseconds) when the key will expire |
+| `credits` | `number?` | Remaining uses (if usage limits set) |
+| `enabled` | `boolean` | Whether the key is enabled |
+| `roles` | `string[]?` | Permissions attached to the key |
+| `permissions` | `string[]?` | Permissions attached to the key |
+| `identity` | `object?` | Identity info if `externalId` was set |
+| `ratelimits` | `object[]?` | Rate limit states (if rate limiting configured) |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Add rate limiting" icon="gauge-high" href="/apis/features/ratelimiting/overview">
+    Limit requests per key
+  </Card>
+  <Card title="Set usage limits" icon="calculator" href="/apis/features/remaining">
+    Cap total requests per key
+  </Card>
+  <Card title="Add permissions" icon="user-shield" href="/apis/features/authorization/introduction">
+    Fine-grained access control
+  </Card>
+  <Card title="Next.js SDK Reference" icon="book" href="/libraries/ts/nextjs">
+    Full SDK documentation
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Getting 401 even with a valid key?">
+    - Ensure the key hasn't expired or been revoked
+    - Verify the `Authorization` header format: `Bearer YOUR_KEY` (note the space)
+    - Check that your root key has the `verify_key` permission
+  </Accordion>
+  
+  <Accordion title="Environment variable not loading?">
+    - Restart your dev server after adding `.env.local`
+    - Make sure the file is in your project root
+    - Check for typos in the variable name
+  </Accordion>
+</AccordionGroup>

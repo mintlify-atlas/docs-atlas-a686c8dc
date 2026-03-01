@@ -1,0 +1,107 @@
+---
+title: 'List Identities'
+description: 'Get a paginated list of all identities in your workspace'
+---
+
+## POST /v2/identities.listIdentities
+
+Get a paginated list of all identities in your workspace. Returns metadata and rate limit configurations. Perfect for building management dashboards, auditing configurations, or browsing your identities.
+
+### Required Permissions
+
+Requires `identity.*.read_identity` permission
+
+### Request
+
+<ParamField body="limit" type="integer">
+  Maximum number of identities to return per request.
+  
+  Example: `50`
+</ParamField>
+
+<ParamField body="cursor" type="string">
+  Pagination cursor from previous response to fetch next page.
+  
+  Example: `cursor_eyJrZXkiOiJrZXlfMTIzNCJ9`
+</ParamField>
+
+### Response
+
+<ResponseField name="identities" type="array" required>
+  Array of identity objects. Each identity includes:
+  - `id` - Internal identity identifier
+  - `externalId` - Your system's identifier
+  - `meta` - Custom metadata object
+  - `ratelimits` - Array of rate limit configurations
+</ResponseField>
+
+<ResponseField name="cursor" type="string">
+  Pagination cursor for fetching the next page (null if no more results).
+</ResponseField>
+
+<ResponseField name="total" type="integer">
+  Total number of identities in the workspace.
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/identities.listIdentities \
+  -H "Authorization: Bearer <your-root-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "limit": 50
+  }'
+```
+
+```json Response
+{
+  "meta": {
+    "requestId": "req_01H9TQPP77V5E48E9SH0BG0ZQX"
+  },
+  "data": {
+    "identities": [
+      {
+        "id": "id_01H9TQP8NP8JN3X8HWSKPW43JE",
+        "externalId": "user_123",
+        "meta": {
+          "name": "Alice Smith",
+          "plan": "premium"
+        },
+        "ratelimits": [
+          {
+            "name": "requests",
+            "limit": 1000,
+            "duration": 60000
+          }
+        ]
+      },
+      {
+        "id": "id_02ZYR3Q9NP8JM4X8HWSKPW43JF",
+        "externalId": "user_456",
+        "meta": {
+          "name": "Bob Johnson",
+          "plan": "basic"
+        },
+        "ratelimits": [
+          {
+            "name": "requests",
+            "limit": 500,
+            "duration": 60000
+          }
+        ]
+      }
+    ],
+    "cursor": "cursor_eyJsYXN0SWQiOiJpZF8wMlpZUjNROU5QOEpNNFg4SFdTS1BXNDNKRiJ9",
+    "total": 247
+  }
+}
+```
+
+### Error Codes
+
+- `400` - Bad request (invalid parameters)
+- `401` - Unauthorized (missing or invalid root key)
+- `403` - Forbidden (insufficient permissions - requires `identity.*.read_identity`)
+- `429` - Too many requests (rate limit exceeded)
+- `500` - Internal server error

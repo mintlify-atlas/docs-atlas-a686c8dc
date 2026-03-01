@@ -1,0 +1,682 @@
+---
+title: Identity System
+description: Group multiple API keys under users or organizations with shared configuration and rate limits
+---
+
+Identities let you connect multiple API keys to a single entity — a user, an organization, a service account, or any logical grouping in your system. Once connected, keys can share configuration, metadata, and most importantly, rate limits.
+
+## The Problem Identities Solve
+
+Without identities, each API key is an island. If a user has 3 keys, you need to:
+- Update rate limits on each key separately
+- Piece together analytics from multiple sources
+- Track usage per-key instead of per-user
+- Allow users to bypass limits by creating more keys
+
+**With identities:**
+
+| Without Identities | With Identities |
+|-------------------|----------------|
+| Rate limits per key (bypass with more keys) | Shared rate limit pool across all keys |
+| Metadata duplicated on each key | Shared metadata accessible from any key |
+| Analytics scattered across keys | Aggregated analytics per identity |
+| Update each key individually | Update once, applies to all keys |
+
+## Real-World Example
+
+Imagine you're building a developer platform like Stripe. Each customer has:
+- A **test key** for development
+- A **production key** for live traffic
+- **Multiple restricted keys** for different microservices
+
+All these keys belong to the same customer. With identities:
+
+```typescript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY });
+
+// 1. Create identity for the customer
+try {
+  const { meta, data } = await unkey.identities.create({
+    externalId: "customer_acme_123",  // Your internal customer ID
+    meta: {
+      plan: "pro",
+      company: "Acme Corp",
+      email: "billing@acme.com"
+    },
+    ratelimits: [{
+      name: "requests",
+      limit: 1000,
+      duration: 60000  // 1000 req/min shared across ALL keys
+    }]
+  });
+
+  const identityId = data.identityId;
+
+  // 2. Create keys linked to this identity
+  await unkey.keys.create({
+    apiId: "api_...",
+    externalId: "customer_acme_123",
+    name: "Production Key"
+  });
+
+  await unkey.keys.create({
+    apiId: "api_...",
+    externalId: "customer_acme_123",
+    name: "Test Key"
+  });
+
+  await unkey.keys.create({
+    apiId: "api_...",
+    externalId: "customer_acme_123",
+    name: "Webhook Service Key"
+  });
+} catch (err) {
+  console.error(err);
+}
+```
+
+Now:
+- All 3 keys share the 1000 req/min limit
+- Updating the identity's plan metadata updates it for all keys
+- Analytics aggregate across all keys
+- Customer can't bypass limits by using different keys
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Shared rate limits" icon="gauge-high">
+    Enforce a single rate limit across all of a user's keys. Prevents bypass through multiple keys.
+  </Card>
+  <Card title="Aggregate analytics" icon="chart-pie">
+    See total usage per customer instead of piecing together data from individual keys.
+  </Card>
+  <Card title="Centralized configuration" icon="sliders">
+    Store plan tier, feature flags, or custom limits once. All keys inherit the configuration.
+  </Card>
+  <Card title="Multi-tenant organizations" icon="building">
+    Map identities to organizations. Team members and services share the org's identity and limits.
+  </Card>
+  <Card title="Service accounts" icon="server">
+    Group keys for different microservices under a single service account identity.
+  </Card>
+  <Card title="User management" icon="users">
+    Track all keys belonging to a user. Revoke all keys when user leaves or account is suspended.
+  </Card>
+</CardGroup>
+
+## Creating Identities
+
+<Tabs>
+  <Tab title="TypeScript">
+    ```typescript
+    import { Unkey } from "@unkey/api";
+
+    const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY });
+
+    try {
+      const { meta, data } = await unkey.identities.create({
+        externalId: "user_123",  // Your internal ID
+        meta: {
+          plan: "enterprise",
+          email: "user@company.com",
+          features: ["advanced-analytics", "sso"]
+        }
+      });
+
+      console.log(data.identityId);  // id_...
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -X POST https://api.unkey.com/v2/identities.createIdentity \
+      -H "Authorization: Bearer $UNKEY_ROOT_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "externalId": "user_123",
+        "meta": {
+          "plan": "enterprise",
+          "email": "user@company.com"
+        }
+      }'
+    ```
+  </Tab>
+</Tabs>
+
+### Identity Data Model
+
+<ParamField body="id" type="string" required>
+  Unkey's internal identifier for this identity. Use this in API calls that reference the identity.
+</ParamField>
+
+<ParamField body="externalId" type="string" required>
+  **Your** identifier for this entity. This links the Unkey identity to your system — typically a user ID, org ID, or customer ID.
+  
+  If you use Clerk, Auth0, WorkOS, or similar: use their user/org ID as the externalId.
+  
+  ```typescript
+  // Example with Clerk
+  const identity = await unkey.identities.create({
+    externalId: clerkUserId,  // "user_2NNEqL2nrIRdJ194ndJqAHwEfxC"
+  });
+  ```
+</ParamField>
+
+<ParamField body="meta" type="json">
+  Arbitrary JSON metadata. Store anything useful: plan tier, feature flags, company name, billing info.
+  
+  ```json
+  {
+    "plan": "enterprise",
+    "features": ["advanced-analytics", "sso"],
+    "billingEmail": "billing@acme.com",
+    "company": "Acme Corp",
+    "stripeCustomerId": "cus_..."
+  }
+  ```
+</ParamField>
+
+<ParamField body="ratelimits" type="array">
+  Rate limits that apply to all keys linked to this identity:
+  
+  ```typescript
+  ratelimits: [
+    {
+      name: "requests",
+      limit: 1000,
+      duration: 60000  // 1000 requests per minute (shared)
+    },
+    {
+      name: "tokens",
+      limit: 50000,
+      duration: 86400000  // 50k tokens per day (shared)
+    }
+  ]
+  ```
+</ParamField>
+
+## Linking Keys to Identities
+
+Create keys that automatically link to an identity using the `externalId` field:
+
+<Tabs>
+  <Tab title="Automatic Linking">
+    ```typescript
+    // Keys with the same externalId automatically link to the identity
+    try {
+      const { meta: meta1, data: data1 } = await unkey.keys.create({
+        apiId: "api_...",
+        externalId: "user_123",  // Links to identity
+        name: "Production Key"
+      });
+
+      const { meta: meta2, data: data2 } = await unkey.keys.create({
+        apiId: "api_...",
+        externalId: "user_123",  // Same identity
+        name: "Staging Key"
+      });
+
+      // Both keys now share the identity's rate limits and metadata
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Tab>
+  <Tab title="Explicit Linking">
+    ```typescript
+    // Explicitly reference the identity ID
+    try {
+      const { meta, data } = await unkey.keys.create({
+        apiId: "api_...",
+        identityId: "id_...",  // Unkey identity ID
+        name: "Mobile App Key"
+      });
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Shared Rate Limits
+
+The killer feature: enforce a **single rate limit** across all of a user's keys.
+
+### The Problem
+
+Without shared limits, rate limits apply per-key:
+
+```
+User has 3 API keys, each with 100 req/s limit
+→ User can actually make 300 req/s (100 × 3 keys)
+```
+
+### The Solution
+
+Create an identity with rate limits, then link all keys to it:
+
+```
+Identity: user_123
+  └── Rate limit: 100 req/s (shared pool)
+      ├── Key A (production)
+      ├── Key B (staging)
+      └── Key C (mobile app)
+
+→ User can only make 100 req/s total across ALL keys
+```
+
+### Implementation
+
+<Steps>
+  <Step title="Create identity with rate limits">
+    ```typescript
+    try {
+      const { meta, data } = await unkey.identities.create({
+        externalId: "user_123",
+        ratelimits: [
+          {
+            name: "requests",
+            limit: 100,
+            duration: 1000  // 100 requests per second
+          }
+        ]
+      });
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Step>
+  
+  <Step title="Create keys linked to identity">
+    ```typescript
+    // All keys with same externalId share the identity's rate limits
+    try {
+      await unkey.keys.create({
+        apiId: "api_...",
+        externalId: "user_123",
+        name: "Production Key"
+      });
+
+      await unkey.keys.create({
+        apiId: "api_...",
+        externalId: "user_123",
+        name: "Staging Key"
+      });
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Step>
+  
+  <Step title="Verify — limits enforced automatically">
+    ```typescript
+    const { meta, data } = await unkey.keys.verifyKey({ key: "sk_prod_..." });
+
+    if (!data.valid && data.code === "RATE_LIMITED") {
+      // User exceeded 100 req/s across ALL their keys
+      return new Response("Rate limit exceeded", { status: 429 });
+    }
+    ```
+  </Step>
+</Steps>
+
+### Multiple Rate Limits
+
+Apply different limits to different resource types:
+
+```typescript
+try {
+  const { meta, data } = await unkey.identities.create({
+    externalId: "user_123",
+    ratelimits: [
+      {
+        name: "requests",
+        limit: 500,
+        duration: 3600000  // 500 requests per hour
+      },
+      {
+        name: "ai-tokens",
+        limit: 20000,
+        duration: 86400000  // 20k tokens per day
+      },
+      {
+        name: "exports",
+        limit: 10,
+        duration: 86400000  // 10 exports per day
+      }
+    ]
+  });
+} catch (err) {
+  console.error(err);
+}
+```
+
+Check specific limits during verification:
+
+```typescript
+// Check the "ai-tokens" limit and consume 150 tokens
+const { meta, data } = await unkey.keys.verifyKey({
+  key: "sk_...",
+  ratelimits: [
+    { name: "ai-tokens", cost: 150 }
+  ]
+});
+
+if (!data.valid) {
+  console.log(data.code);  // "RATE_LIMITED" if tokens exhausted
+}
+```
+
+If *any* specified limit is exceeded, verification fails.
+
+## Accessing Identity Data
+
+When you verify a key linked to an identity, you get the identity info:
+
+```typescript
+const { meta, data } = await unkey.keys.verifyKey({ key: "sk_..." });
+
+if (data.valid) {
+  console.log(data.identity);
+  // {
+  //   id: "id_...",
+  //   externalId: "customer_acme_123",
+  //   meta: {
+  //     plan: "pro",
+  //     company: "Acme Corp",
+  //     features: ["analytics", "sso"]
+  //   }
+  // }
+
+  // Use identity metadata to control features
+  if (data.identity.meta.features?.includes("analytics")) {
+    // Show advanced analytics
+  }
+}
+```
+
+## Updating Identities
+
+Update identity metadata or rate limits — changes apply to all linked keys:
+
+<Tabs>
+  <Tab title="Update Metadata">
+    ```typescript
+    // User upgraded from Pro to Enterprise
+    try {
+      const { meta, data } = await unkey.identities.update({
+        identityId: "id_...",
+        meta: {
+          plan: "enterprise",
+          features: ["analytics", "sso", "audit-logs", "sla"]
+        }
+      });
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Tab>
+  <Tab title="Update Rate Limits">
+    ```typescript
+    // Increase rate limit for enterprise plan
+    try {
+      const { meta, data } = await unkey.identities.update({
+        identityId: "id_...",
+        ratelimits: [
+          {
+            name: "requests",
+            limit: 10000,
+            duration: 60000  // 10k req/min (up from 1k)
+          }
+        ]
+      });
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Tab>
+  <Tab title="By External ID">
+    ```typescript
+    // Update using your internal ID
+    try {
+      const { meta, data } = await unkey.identities.update({
+        externalId: "user_123",
+        meta: {
+          plan: "enterprise"
+        }
+      });
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Managing Keys per Identity
+
+List all keys belonging to an identity:
+
+```typescript
+try {
+  const { meta, data } = await unkey.keys.list({
+    apiId: "api_...",
+    externalId: "user_123"
+  });
+
+  console.log(data.keys);
+  // [
+  //   { id: "key_...", name: "Production Key", ... },
+  //   { id: "key_...", name: "Staging Key", ... },
+  //   { id: "key_...", name: "Mobile App Key", ... }
+  // ]
+} catch (err) {
+  console.error(err);
+}
+```
+
+### Revoke All Keys for an Identity
+
+When a user leaves or account is suspended:
+
+```typescript
+try {
+  // Get all keys for the user
+  const { meta, data } = await unkey.keys.list({
+    apiId: "api_...",
+    externalId: "user_123"
+  });
+
+  // Delete them all
+  for (const key of data.keys) {
+    await unkey.keys.delete({ keyId: key.id });
+  }
+} catch (err) {
+  console.error(err);
+}
+```
+
+## Common Patterns
+
+<AccordionGroup>
+  <Accordion title="Integration with auth providers" icon="key">
+    Link Unkey identities to Clerk, Auth0, or WorkOS:
+
+    ```typescript
+    // After user signs up in Clerk
+    const clerkUserId = user.id;  // "user_2NNEqL..."
+
+    // Create matching Unkey identity
+    try {
+      const { meta, data } = await unkey.identities.create({
+        externalId: clerkUserId,
+        meta: {
+          email: user.emailAddresses[0].emailAddress,
+          name: user.fullName
+        }
+      });
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Multi-tenant organizations" icon="building">
+    Use organization IDs as externalIds for team-based rate limiting:
+
+    ```typescript
+    // All team members share org-level rate limits
+    try {
+      const { meta, data } = await unkey.identities.create({
+        externalId: `org_${organization.id}`,
+        meta: {
+          orgName: organization.name,
+          plan: organization.plan
+        },
+        ratelimits: [{
+          name: "requests",
+          limit: 10000,
+          duration: 60000  // 10k/min for entire org
+        }]
+      });
+
+      // Create key for team member
+      await unkey.keys.create({
+        apiId: "api_...",
+        externalId: `org_${organization.id}`,
+        name: `${user.name} - ${organization.name}`
+      });
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Tiered rate limits by plan" icon="layer-group">
+    Different plans get different limits:
+
+    ```typescript
+    const PLAN_LIMITS = {
+      free: { limit: 100, duration: 60000 },      // 100/min
+      pro: { limit: 1000, duration: 60000 },      // 1000/min
+      enterprise: { limit: 10000, duration: 60000 } // 10k/min
+    };
+
+    try {
+      const { meta, data } = await unkey.identities.create({
+        externalId: userId,
+        meta: { plan: "pro" },
+        ratelimits: [{
+          name: "requests",
+          ...PLAN_LIMITS["pro"]
+        }]
+      });
+    } catch (err) {
+      console.error(err);
+    }
+
+    // When user upgrades
+    try {
+      await unkey.identities.update({
+        externalId: userId,
+        meta: { plan: "enterprise" },
+        ratelimits: [{
+          name: "requests",
+          ...PLAN_LIMITS["enterprise"]
+        }]
+      });
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Environment-specific keys" icon="code-branch">
+    Production and staging keys for the same user:
+
+    ```typescript
+    try {
+      const { meta, data } = await unkey.identities.create({
+        externalId: "user_123",
+        ratelimits: [{ name: "requests", limit: 1000, duration: 60000 }]
+      });
+
+      // Production key
+      await unkey.keys.create({
+        apiId: "api_...",
+        externalId: "user_123",
+        name: "Production Key",
+        meta: { environment: "production" }
+      });
+
+      // Staging key
+      await unkey.keys.create({
+        apiId: "api_...",
+        externalId: "user_123",
+        name: "Staging Key",
+        meta: { environment: "staging" }
+      });
+
+      // Both share the 1000/min rate limit
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Analytics & Insights
+
+Identities enable powerful analytics:
+
+- **Per-customer usage**: See total API usage per customer instead of per-key
+- **Churn prediction**: Identify customers with declining usage
+- **Upsell opportunities**: Find users hitting rate limits who might upgrade
+- **Cost attribution**: Track API costs per customer for accurate billing
+
+<Note>
+Analytics are automatically aggregated by identity. View in the Unkey dashboard under **Analytics** → filter by `externalId`.
+</Note>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use meaningful external IDs" icon="fingerprint">
+    Use your existing user/org IDs as `externalId`. Makes it easy to join Unkey data with your database.
+  </Card>
+  <Card title="Store plan tier in metadata" icon="tag">
+    Keep plan information in identity metadata for easy access during verification without extra DB queries.
+  </Card>
+  <Card title="One identity per customer" icon="user">
+    Even if users have multiple projects, use one identity per user. Use key metadata for project scoping.
+  </Card>
+  <Card title="Set rate limits on identities" icon="gauge-high">
+    Always set rate limits on the identity, not individual keys, to prevent bypass through multiple keys.
+  </Card>
+  <Card title="Update identities on upgrades" icon="arrow-up">
+    When users upgrade plans, update the identity's rate limits and metadata immediately.
+  </Card>
+  <Card title="Clean up on churn" icon="trash">
+    Delete identities and all associated keys when users churn to keep your workspace clean.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Keys" icon="key" href="/features/api-keys">
+    Learn about creating and managing API keys
+  </Card>
+  <Card title="Rate Limiting" icon="gauge-high" href="/features/rate-limiting">
+    Deep dive into rate limiting strategies
+  </Card>
+  <Card title="Analytics" icon="chart-line" href="/features/analytics">
+    Track usage patterns per identity
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/v2/overview">
+    Complete identity API documentation
+  </Card>
+</CardGroup>

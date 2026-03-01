@@ -1,0 +1,361 @@
+---
+title: Verify API Key
+description: Verify an API key's validity and permissions for request authentication
+---
+
+Verify an API key's validity and permissions for request authentication.
+
+Use this endpoint on every incoming request to your protected resources. It checks key validity, permissions, rate limits, and usage quotas in a single call.
+
+**Important**: Returns HTTP 200 for all verification outcomes — check the `valid` field in response data to determine if the key is authorized. A 429 may be returned if the workspace exceeds its API rate limit.
+
+## Common Use Cases
+
+- Authenticate API requests before processing
+- Enforce permission-based access control
+- Track usage and apply rate limits
+
+## Required Permissions
+
+Your root key needs one of:
+- `api.*.verify_key` (verify keys in any API)
+- `api.<api_id>.verify_key` (verify keys in specific API)
+
+**Note**: If your root key has no verify permissions at all, you will receive a `403 Forbidden` error. If your root key has verify permissions for a different API than the key you're verifying, you will receive a `200` response with `code: NOT_FOUND` to avoid leaking key existence.
+
+## Request
+
+<ParamField body="key" type="string" required>
+  The API key to verify, exactly as provided by your user. Include any prefix - even small changes will cause verification to fail.
+  
+  **Length**: 1-512 characters
+  
+  **Example**: `sk_1234abcdef`
+</ParamField>
+
+<ParamField body="tags" type="array">
+  Attaches metadata tags for analytics and monitoring without affecting verification outcomes. Enables segmentation of API usage in dashboards by endpoint, client version, region, or custom dimensions.
+  
+  Use 'key=value' format for compatibility with most analytics tools and clear categorization. Avoid including sensitive data in tags as they may appear in logs and analytics reports.
+  
+  **Example**: `["endpoint=/users/profile", "method=GET", "region=us-east-1"]`
+</ParamField>
+
+<ParamField body="permissions" type="string">
+  Checks if the key has the specified permission(s) using a query syntax. Supports single permissions, logical operators (AND, OR), and parentheses for grouping.
+  
+  Verification fails if the key lacks the required permissions through direct assignment or role inheritance.
+  
+  **Examples**:
+  - Single permission: `"documents.read"`
+  - Multiple permissions: `"documents.read AND documents.write"`
+  - Complex queries: `"(documents.read OR documents.write) AND users.view"`
+  
+  **Length**: 1-1000 characters
+</ParamField>
+
+<ParamField body="credits" type="object">
+  Controls credit consumption during verification.
+  
+  <ParamField body="cost" type="integer">
+    Number of credits to deduct from the key's remaining balance upon successful verification.
+  </ParamField>
+</ParamField>
+
+<ParamField body="ratelimits" type="array">
+  Enforces time-based rate limiting during verification to prevent abuse and ensure fair usage. Omitting this field skips rate limit checks entirely, relying only on configured key rate limits.
+  
+  Multiple rate limits can be checked simultaneously, each with different costs and temporary overrides.
+</ParamField>
+
+<ParamField body="migrationId" type="string">
+  Migrate keys on demand from your previous system. Reach out for migration support at support@unkey.dev
+  
+  **Length**: Max 256 characters
+</ParamField>
+
+## Response
+
+<ResponseField name="valid" type="boolean" required>
+  The primary verification result. If true, the key is valid and can be used. If false, check the 'code' field to understand why verification failed.
+  
+  Your application should always check this field first before proceeding.
+</ResponseField>
+
+<ResponseField name="code" type="string" required>
+  A machine-readable code indicating the verification status or failure reason.
+  
+  **Values**:
+  - `VALID` - Key is valid and passed all checks
+  - `NOT_FOUND` - Key doesn't exist or belongs to wrong API
+  - `FORBIDDEN` - Key lacks required permissions
+  - `INSUFFICIENT_PERMISSIONS` - Key lacks specific required permissions for this request
+  - `USAGE_EXCEEDED` - Key has no remaining credits
+  - `RATE_LIMITED` - Key exceeded rate limits
+  - `DISABLED` - Key was explicitly disabled
+  - `EXPIRED` - Key has passed its expiration date
+</ResponseField>
+
+<ResponseField name="keyId" type="string">
+  The unique identifier of the verified key in Unkey's system. Use this ID for operations like updating or revoking the key.
+  
+  This field is returned for both valid and invalid keys (except when `code=NOT_FOUND`).
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The human-readable name assigned to this key during creation. This is useful for displaying in logs or admin interfaces to identify the key's purpose.
+</ResponseField>
+
+<ResponseField name="meta" type="object">
+  Custom metadata associated with the key. This can include any JSON-serializable data you stored with the key during creation or updates, such as plan information, feature flags, or user details.
+  
+  Use this to avoid additional database lookups for contextual information needed during API calls.
+</ResponseField>
+
+<ResponseField name="expires" type="integer">
+  Unix timestamp (in milliseconds) when the key will expire. If omitted, the key has no expiration.
+  
+  You can use this to warn users about upcoming expirations or to understand the validity period.
+</ResponseField>
+
+<ResponseField name="credits" type="integer">
+  The number of requests/credits remaining for this key. If omitted, the key has unlimited usage.
+  
+  This value decreases with each verification (based on the 'cost' parameter) unless explicit credit refills are configured.
+</ResponseField>
+
+<ResponseField name="enabled" type="boolean">
+  Indicates if the key is currently enabled. Disabled keys will always fail verification with `code=DISABLED`.
+  
+  This is useful for implementing temporary suspensions without deleting the key.
+</ResponseField>
+
+<ResponseField name="permissions" type="array">
+  A list of all permission names assigned to this key, either directly or through roles. These permissions determine what actions the key can perform.
+  
+  Only returned when permissions were checked during verification or when the key fails with `code=FORBIDDEN`.
+</ResponseField>
+
+<ResponseField name="roles" type="array">
+  A list of all role names assigned to this key. Roles are collections of permissions that grant access to specific functionality.
+  
+  Only returned when permissions were checked during verification.
+</ResponseField>
+
+<ResponseField name="identity" type="object">
+  Information about the identity associated with this key. Identities allow multiple keys to share resources (like rate limits) and represent the same user or entity across different applications or devices.
+  
+  <ResponseField name="externalId" type="string">
+    The identifier from your system that this key is associated with.
+  </ResponseField>
+  
+  <ResponseField name="meta" type="object">
+    Custom metadata associated with the identity.
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="ratelimits" type="array">
+  The rate limits that were checked during this verification, including current state and remaining capacity.
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.verifyKey \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "key": "sk_1234abcdef"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const { result } = await unkey.keys.verify({
+  key: "sk_1234abcdef",
+});
+
+if (result.valid) {
+  console.log("Key is valid!");
+  console.log("Key ID:", result.keyId);
+  console.log("Remaining credits:", result.credits);
+} else {
+  console.log("Key is invalid:", result.code);
+}
+```
+
+```python Python
+import os
+import requests
+
+response = requests.post(
+    "https://api.unkey.com/v2/keys.verifyKey",
+    headers={
+        "Authorization": f"Bearer {os.environ['UNKEY_ROOT_KEY']}",
+        "Content-Type": "application/json"
+    },
+    json={
+        "key": "sk_1234abcdef"
+    }
+)
+
+result = response.json()["data"]
+if result["valid"]:
+    print("Key is valid!")
+    print(f"Key ID: {result['keyId']}")
+    print(f"Remaining credits: {result.get('credits')}")
+else:
+    print(f"Key is invalid: {result['code']}")
+```
+
+```go Go
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/unkeyed/unkey-go"
+	"github.com/unkeyed/unkey-go/models/components"
+)
+
+func main() {
+	uk := unkey.New(
+		unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+	)
+
+	ctx := context.Background()
+	res, err := uk.Keys.VerifyKey(ctx, &components.V2KeysVerifyKeyRequestBody{
+		Key: "sk_1234abcdef",
+	})
+
+	if err != nil {
+		panic(err)
+	}
+
+	if res.Data.Valid {
+		fmt.Println("Key is valid!")
+		fmt.Printf("Key ID: %s\n", *res.Data.KeyID)
+	} else {
+		fmt.Printf("Key is invalid: %s\n", res.Data.Code)
+	}
+}
+```
+</CodeGroup>
+
+### With Permission Check
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.verifyKey \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "key": "sk_1234abcdef",
+    "permissions": "documents.read AND users.view"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const { result } = await unkey.keys.verify({
+  key: "sk_1234abcdef",
+  permissions: "documents.read AND users.view",
+});
+
+if (result.valid) {
+  console.log("Key has required permissions!");
+  console.log("All permissions:", result.permissions);
+} else {
+  console.log("Verification failed:", result.code);
+}
+```
+</CodeGroup>
+
+## Response Examples
+
+### Valid Key
+
+```json
+{
+  "meta": {
+    "requestId": "req_abc123def456"
+  },
+  "data": {
+    "code": "VALID",
+    "valid": true,
+    "enabled": true,
+    "keyId": "key_1234abcd",
+    "name": "user-dashboard-key",
+    "permissions": ["documents.read", "documents.write", "users.view"],
+    "roles": ["editor"],
+    "credits": 950,
+    "expires": 1735689600000,
+    "meta": {
+      "userId": "user_12345",
+      "plan": "premium",
+      "region": "us-east-1"
+    }
+  }
+}
+```
+
+### Expired Key
+
+```json
+{
+  "meta": {
+    "requestId": "req_def456ghi789"
+  },
+  "data": {
+    "code": "EXPIRED",
+    "valid": false,
+    "enabled": true,
+    "keyId": "key_5678efgh",
+    "name": "temporary-access-key",
+    "expires": 1704067200000
+  }
+}
+```
+
+### Insufficient Credits
+
+```json
+{
+  "meta": {
+    "requestId": "req_ghi789jkl012"
+  },
+  "data": {
+    "code": "USAGE_EXCEEDED",
+    "valid": false,
+    "enabled": true,
+    "keyId": "key_9012ijkl",
+    "credits": 0
+  }
+}
+```
+
+### Permission Denied
+
+```json
+{
+  "meta": {
+    "requestId": "req_jkl012mno345"
+  },
+  "data": {
+    "code": "FORBIDDEN",
+    "valid": false,
+    "enabled": true,
+    "keyId": "key_3456mnop",
+    "permissions": ["documents.read"]
+  }
+}
+```

@@ -1,0 +1,492 @@
+---
+title: Error Handling
+description: Understand error response formats, status codes, and troubleshooting guidance
+---
+
+The Unkey API uses conventional HTTP status codes and returns detailed error information following the Problem Details for HTTP APIs standard (RFC 7807). This ensures consistent, machine-readable error responses across all endpoints.
+
+## Error Response Format
+
+All error responses follow this structure:
+
+```json
+{
+  "meta": {
+    "requestId": "req_2c9a0jf23l4k567"
+  },
+  "error": {
+    "title": "Bad Request",
+    "detail": "The resource you are attempting to modify is protected and cannot be changed",
+    "status": 400,
+    "type": "https://unkey.com/docs/errors/unkey/application/protected_resource",
+    "errors": [
+      {
+        "location": "body.name",
+        "message": "Must be at least 3 characters long",
+        "fix": "Ensure the name uses only alphanumeric characters, underscores, and hyphens"
+      }
+    ]
+  }
+}
+```
+
+<ResponseField name="meta" type="object" required>
+  Operational metadata
+  
+  <Expandable title="properties">
+    <ResponseField name="requestId" type="string" required>
+      Unique identifier for this request. Include this when contacting support.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="error" type="object" required>
+  Error details
+  
+  <Expandable title="properties">
+    <ResponseField name="title" type="string" required>
+      Human-readable error summary. Use this for programmatic error handling as it remains consistent across occurrences.
+    </ResponseField>
+    
+    <ResponseField name="detail" type="string" required>
+      Detailed explanation of what went wrong and potential remediation steps.
+    </ResponseField>
+    
+    <ResponseField name="status" type="integer" required>
+      HTTP status code matching the response status.
+    </ResponseField>
+    
+    <ResponseField name="type" type="string" required>
+      URI reference identifying the error type. Visit this URL for detailed documentation about the error.
+    </ResponseField>
+    
+    <ResponseField name="errors" type="array">
+      Array of validation errors (only present for 400 Bad Request responses). Each error provides specific details about validation failures.
+      
+      <Expandable title="properties">
+        <ResponseField name="location" type="string" required>
+          JSON path indicating where the error occurred (e.g., `body.name`, `body.items[3].tags`, `query.limit`)
+        </ResponseField>
+        
+        <ResponseField name="message" type="string" required>
+          Detailed explanation of the validation failure
+        </ResponseField>
+        
+        <ResponseField name="fix" type="string">
+          Human-readable suggestion for resolving the error
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## HTTP Status Codes
+
+The Unkey API uses these HTTP status codes:
+
+### Success Codes
+
+<ResponseField name="200 OK" type="status">
+  Request succeeded. The response includes the requested data.
+  
+  **Note**: Key verification always returns 200, even when validation fails. Check the `valid` field in the response data.
+</ResponseField>
+
+### Client Error Codes
+
+<ResponseField name="400 Bad Request" type="status">
+  Request cannot be processed due to client error. This occurs when:
+  
+  - Required parameters are missing
+  - Parameters are malformed or invalid
+  - Request fails validation rules
+  
+  The response includes an `errors` array with specific validation failures.
+</ResponseField>
+
+<ResponseField name="401 Unauthorized" type="status">
+  Authentication failed or credentials are missing. This occurs when:
+  
+  - No `Authorization` header is provided
+  - The provided root key is invalid, expired, or malformed
+  - The token format doesn't match expected patterns
+  
+  **Resolution**: Ensure you're including a valid root key in the Authorization header.
+</ResponseField>
+
+<ResponseField name="403 Forbidden" type="status">
+  Credentials are valid but lack sufficient permissions. This occurs when:
+  
+  - The root key doesn't have required permissions for this endpoint
+  - The operation requires elevated privileges
+  - Access is restricted based on workspace settings
+  
+  **Resolution**: Verify your root key has the necessary permissions or contact your workspace administrator.
+</ResponseField>
+
+<ResponseField name="404 Not Found" type="status">
+  The requested resource doesn't exist. This occurs when:
+  
+  - The resource ID is incorrect
+  - The resource has been deleted
+  - You lack permissions to access the resource
+  
+  **Note**: Some endpoints return 404 instead of 403 to avoid leaking resource existence.
+</ResponseField>
+
+<ResponseField name="409 Conflict" type="status">
+  Request conflicts with current state. This occurs when:
+  
+  - Creating a resource that already exists
+  - Modifying a resource with stale data
+  - Operation violates uniqueness constraints
+  
+  **Resolution**: Check current resource state and adjust your request.
+</ResponseField>
+
+<ResponseField name="412 Precondition Failed" type="status">
+  Request preconditions were not met. This occurs when:
+  
+  - Conditional request headers don't match
+  - Resource state doesn't match expectations
+  
+  **Resolution**: Refresh resource state and retry the operation.
+</ResponseField>
+
+<ResponseField name="422 Unprocessable Entity" type="status">
+  Request is well-formed but semantically invalid. This occurs when:
+  
+  - Business logic rules are violated
+  - Resource constraints prevent the operation
+  - Invalid state transitions
+  
+  **Resolution**: Review business rules and adjust your request.
+</ResponseField>
+
+<ResponseField name="429 Too Many Requests" type="status">
+  Rate limit exceeded. This occurs when:
+  
+  - Too many requests in a given time period
+  - Workspace quota exceeded
+  
+  **Resolution**: Implement exponential backoff and retry logic. The rate limit resets automatically after the time window expires.
+</ResponseField>
+
+### Server Error Codes
+
+<ResponseField name="500 Internal Server Error" type="status">
+  Unexpected server error occurred. This indicates an issue on Unkey's side.
+  
+  **Resolution**: Retry the request with exponential backoff. If the issue persists, contact support with the `requestId`.
+</ResponseField>
+
+<ResponseField name="503 Service Unavailable" type="status">
+  Service is temporarily unavailable. This occurs during:
+  
+  - Planned maintenance
+  - Temporary outages
+  - System overload
+  
+  **Resolution**: Retry the request with exponential backoff.
+</ResponseField>
+
+## Common Error Scenarios
+
+### Validation Errors
+
+400 Bad Request responses include detailed validation errors:
+
+```json
+{
+  "meta": {
+    "requestId": "req_01H9TQPP77V5E48E9SH0BG0ZQX"
+  },
+  "error": {
+    "title": "Bad Request",
+    "detail": "Syntax error in permission query: unexpected token 'AND' at position 15. Expected permission name or opening parenthesis.",
+    "status": 400,
+    "type": "https://unkey.com/docs/errors/user/bad_request/permissions_query_syntax_error",
+    "errors": [
+      {
+        "location": "body.permissions",
+        "message": "unexpected token 'AND' at position 15",
+        "fix": "Check your query syntax. AND/OR operators must be between permissions, not at the start or end"
+      }
+    ]
+  }
+}
+```
+
+**How to handle:**
+
+1. Check the `errors` array for specific validation failures
+2. Use the `location` field to identify the problematic parameter
+3. Read the `message` for details about what's wrong
+4. Follow the `fix` suggestion (when provided) to resolve the issue
+
+### Permission Errors
+
+When your root key lacks required permissions:
+
+```json
+{
+  "meta": {
+    "requestId": "req_2c9a0jf23l4k567"
+  },
+  "error": {
+    "title": "Forbidden",
+    "detail": "The resource you are attempting to modify is protected and cannot be changed",
+    "status": 403,
+    "type": "https://unkey.com/docs/errors/unkey/application/protected_resource"
+  }
+}
+```
+
+**How to handle:**
+
+1. Verify your root key has the required permissions listed in the endpoint documentation
+2. Check if you're accessing resources outside your permitted scope
+3. Create a new root key with appropriate permissions if needed
+4. Contact your workspace administrator if you need elevated access
+
+### Rate Limiting
+
+When you exceed rate limits:
+
+```json
+{
+  "meta": {
+    "requestId": "req_2c9a0jf23l4k567"
+  },
+  "error": {
+    "title": "Too Many Requests",
+    "detail": "Rate limit exceeded. Please retry after 60 seconds.",
+    "status": 429,
+    "type": "https://unkey.com/docs/errors/rate_limit"
+  }
+}
+```
+
+**How to handle:**
+
+1. Implement exponential backoff in your retry logic
+2. Cache responses where appropriate to reduce request frequency
+3. Spread requests over time instead of bursting
+4. Contact support if you consistently hit limits
+
+## Error Handling Best Practices
+
+### Check Status Codes
+
+Always check HTTP status codes before processing responses:
+
+<CodeGroup>
+
+```typescript TypeScript
+try {
+  const response = await fetch('https://api.unkey.com/v2/keys.getKey', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${rootKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ keyId: 'key_123' })
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    console.error(`Error ${error.error.status}: ${error.error.detail}`);
+    console.error(`Request ID: ${error.meta.requestId}`);
+    throw new Error(error.error.detail);
+  }
+
+  const data = await response.json();
+  return data;
+} catch (error) {
+  // Handle network errors
+  console.error('Network error:', error);
+  throw error;
+}
+```
+
+```python Python
+from unkey import Unkey, UnkeyError
+
+try:
+    result = unkey.keys.get(key_id="key_123")
+except UnkeyError as e:
+    print(f"Error {e.status}: {e.detail}")
+    print(f"Request ID: {e.request_id}")
+    raise
+```
+
+```go Go
+result, err := client.Keys.Get(ctx, &unkey.GetKeyRequest{
+    KeyID: "key_123",
+})
+if err != nil {
+    if unkeyErr, ok := err.(*unkey.Error); ok {
+        log.Printf("Error %d: %s", unkeyErr.Status, unkeyErr.Detail)
+        log.Printf("Request ID: %s", unkeyErr.RequestID)
+    }
+    return err
+}
+```
+
+</CodeGroup>
+
+### Parse Validation Errors
+
+For 400 responses, iterate through validation errors:
+
+```typescript
+if (error.error.status === 400 && error.error.errors) {
+  error.error.errors.forEach(validationError => {
+    console.error(`${validationError.location}: ${validationError.message}`);
+    if (validationError.fix) {
+      console.log(`Suggestion: ${validationError.fix}`);
+    }
+  });
+}
+```
+
+### Implement Retry Logic
+
+Retry failed requests with exponential backoff:
+
+```typescript
+async function makeRequestWithRetry(url: string, options: RequestInit, maxRetries = 3) {
+  let lastError;
+  
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await fetch(url, options);
+      
+      // Retry on 5xx errors and 429
+      if (response.status >= 500 || response.status === 429) {
+        const delay = Math.min(1000 * Math.pow(2, i), 10000);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      
+      return response;
+    } catch (error) {
+      lastError = error;
+      const delay = Math.min(1000 * Math.pow(2, i), 10000);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError;
+}
+```
+
+### Log Request IDs
+
+Always log request IDs for debugging:
+
+```typescript
+const response = await makeRequest();
+console.log(`Request ID: ${response.meta.requestId}`);
+```
+
+### Handle Special Cases
+
+Some endpoints have unique error behavior:
+
+**Key Verification**: Always returns 200, check the `valid` field:
+
+```typescript
+const result = await unkey.keys.verify({ key: userKey });
+
+if (!result.valid) {
+  // Key is invalid, check result.code for reason
+  console.log(`Verification failed: ${result.code}`);
+  return;
+}
+
+// Key is valid, proceed
+```
+
+## Troubleshooting Guide
+
+### Issue: Getting 401 Unauthorized
+
+<Steps>
+  <Step title="Check Authorization header">
+    Ensure the `Authorization` header is present and properly formatted:
+    ```
+    Authorization: Bearer unkey_xxxxxxxxxxx
+    ```
+  </Step>
+  
+  <Step title="Verify root key">
+    Confirm the root key hasn't been revoked or expired in your dashboard.
+  </Step>
+  
+  <Step title="Check for typos">
+    Root keys are case-sensitive. Verify you're using the exact key value.
+  </Step>
+</Steps>
+
+### Issue: Getting 403 Forbidden
+
+<Steps>
+  <Step title="Check endpoint permissions">
+    Review the endpoint documentation for required permissions.
+  </Step>
+  
+  <Step title="Verify root key permissions">
+    Go to **Settings** > **Root Keys** in your dashboard and check the key's permissions.
+  </Step>
+  
+  <Step title="Update permissions">
+    Create a new root key with the required permissions if needed.
+  </Step>
+</Steps>
+
+### Issue: Getting 400 Bad Request
+
+<Steps>
+  <Step title="Check validation errors">
+    Read the `errors` array in the response for specific validation failures.
+  </Step>
+  
+  <Step title="Verify request format">
+    Ensure your request body matches the endpoint's schema.
+  </Step>
+  
+  <Step title="Check required fields">
+    Confirm all required fields are present and correctly formatted.
+  </Step>
+</Steps>
+
+### Issue: Getting 429 Too Many Requests
+
+<Steps>
+  <Step title="Implement backoff">
+    Add exponential backoff to your retry logic.
+  </Step>
+  
+  <Step title="Reduce request frequency">
+    Cache responses where possible to reduce API calls.
+  </Step>
+  
+  <Step title="Contact support">
+    If you consistently hit limits, reach out to discuss increasing your quota.
+  </Step>
+</Steps>
+
+## Getting Help
+
+If you encounter persistent errors:
+
+1. **Check the error type URL**: Visit the URL in the `type` field for detailed documentation
+2. **Review this documentation**: Search for your specific error code or scenario
+3. **Include request ID**: When contacting support, always include the `requestId` from the error response
+4. **Join our Discord**: Get help from the community and Unkey team
+5. **Contact support**: Reach out at [support@unkey.com](mailto:support@unkey.com) with:
+   - Request ID
+   - Error response
+   - What you were trying to accomplish
+   - Steps to reproduce

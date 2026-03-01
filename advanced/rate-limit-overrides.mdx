@@ -1,0 +1,535 @@
+---
+title: Dynamic Rate Limit Overrides
+description: Adjust rate limits per customer, override default limits, and implement tier-based rate limiting strategies
+---
+
+Unkey's rate limiting system allows you to set different limits for different customers, override defaults dynamically, and implement sophisticated tier-based strategies. This enables fair usage policies while rewarding premium customers with higher limits.
+
+## Rate limit architecture
+
+Unkey supports **multiple named rate limits** per key, giving you fine-grained control:
+
+```typescript
+// A single key can have multiple rate limits
+const { data } = await unkey.keys.create({
+  apiId: "api_...",
+  ratelimits: [
+    {
+      name: "requests",
+      limit: 100,
+      duration: 60000,  // 100 requests per minute
+      autoApply: true,
+    },
+    {
+      name: "tokens",
+      limit: 50000,
+      duration: 3600000,  // 50k tokens per hour
+      autoApply: false,
+    },
+    {
+      name: "expensive-ops",
+      limit: 10,
+      duration: 60000,  // 10 expensive operations per minute
+      autoApply: false,
+    },
+  ],
+});
+```
+
+<Note>
+**Auto-apply vs manual rate limits:**
+- `autoApply: true` — Checked on every verification automatically
+- `autoApply: false` — Only checked when explicitly specified in verification request
+</Note>
+
+## Auto-apply rate limits
+
+Auto-apply limits are enforced on every key verification:
+
+```typescript
+// Create key with auto-apply limit
+const { data } = await unkey.keys.create({
+  apiId: "api_...",
+  ratelimits: [
+    {
+      name: "general",
+      limit: 1000,
+      duration: 3600000,  // 1000 requests per hour
+      autoApply: true,
+    },
+  ],
+});
+
+// Verify - auto-apply limit is checked automatically
+const { data: verifyData } = await verifyKey({
+  key: "sk_...",
+});
+
+if (!verifyData.valid && verifyData.code === "RATE_LIMITED") {
+  return Response.json({ error: "Rate limit exceeded" }, { status: 429 });
+}
+```
+
+## Manual rate limits
+
+Manual limits are only checked when explicitly specified:
+
+```typescript
+// Create key with manual limit
+const { data } = await unkey.keys.create({
+  apiId: "api_...",
+  ratelimits: [
+    {
+      name: "expensive-operations",
+      limit: 5,
+      duration: 60000,  // 5 per minute
+    },
+  ],
+});
+
+// Check the limit only for expensive operations
+const { data: verifyData } = await verifyKey({
+  key: "sk_...",
+  ratelimits: [
+    {
+      name: "expensive-operations",
+      cost: 1,
+    },
+  ],
+});
+```
+
+## Dynamic cost overrides
+
+Adjust how much each request "costs" against the rate limit:
+
+<CodeGroup>
+
+```typescript TypeScript
+// Small query - costs 1
+const { data } = await verifyKey({
+  key: "sk_...",
+  ratelimits: [
+    {
+      name: "requests",
+      cost: 1,
+    },
+  ],
+});
+
+// Complex query - costs 5
+const { data: heavyData } = await verifyKey({
+  key: "sk_...",
+  ratelimits: [
+    {
+      name: "requests",
+      cost: 5,
+    },
+  ],
+});
+
+// Batch operation - costs 10
+const { data: batchData } = await verifyKey({
+  key: "sk_...",
+  ratelimits: [
+    {
+      name: "requests",
+      cost: 10,
+    },
+  ],
+});
+```
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.verifyKey \
+  -H "Content-Type: application/json" \
+  -d '{
+    "key": "sk_...",
+    "ratelimits": [
+      {
+        "name": "requests",
+        "cost": 5
+      }
+    ]
+  }'
+```
+
+</CodeGroup>
+
+### Example: Token-based rate limiting
+
+For AI APIs, limit by tokens consumed rather than request count:
+
+```typescript
+export async function handleAIRequest(request: Request) {
+  const prompt = await request.json();
+  const estimatedTokens = estimateTokenCount(prompt.text);
+
+  // Verify and consume tokens from the rate limit
+  const { data } = await verifyKey({
+    key: request.apiKey,
+    ratelimits: [
+      {
+        name: "tokens",
+        cost: estimatedTokens,
+      },
+    ],
+  });
+
+  if (!data.valid) {
+    if (data.code === "RATE_LIMITED") {
+      return Response.json(
+        { error: "Token rate limit exceeded. Please try again later." },
+        { status: 429 }
+      );
+    }
+    return Response.json({ error: data.code }, { status: 401 });
+  }
+
+  // Process AI request
+  const response = await openai.complete(prompt);
+  return Response.json({ response });
+}
+```
+
+## Per-customer rate limits
+
+Set different rate limits for different subscription tiers:
+
+```typescript
+const TIER_LIMITS = {
+  free: {
+    requests: { limit: 100, duration: 3600000 },    // 100/hour
+    tokens: { limit: 10000, duration: 86400000 },   // 10k/day
+  },
+  starter: {
+    requests: { limit: 1000, duration: 3600000 },   // 1k/hour
+    tokens: { limit: 100000, duration: 86400000 },  // 100k/day
+  },
+  pro: {
+    requests: { limit: 10000, duration: 3600000 },  // 10k/hour
+    tokens: { limit: 1000000, duration: 86400000 }, // 1M/day
+  },
+  enterprise: null,  // No limits
+} as const;
+
+export async function createKeyForTier(tier: keyof typeof TIER_LIMITS) {
+  const limits = TIER_LIMITS[tier];
+
+  if (!limits) {
+    // Enterprise - no rate limits
+    return await unkey.keys.create({ apiId: "api_..." });
+  }
+
+  return await unkey.keys.create({
+    apiId: "api_...",
+    ratelimits: [
+      {
+        name: "requests",
+        limit: limits.requests.limit,
+        duration: limits.requests.duration,
+        autoApply: true,
+      },
+      {
+        name: "tokens",
+        limit: limits.tokens.limit,
+        duration: limits.tokens.duration,
+      },
+    ],
+  });
+}
+```
+
+## Updating rate limits
+
+Adjust limits when customers upgrade or downgrade:
+
+```typescript
+export async function updateCustomerTier(
+  keyId: string,
+  newTier: keyof typeof TIER_LIMITS
+) {
+  const limits = TIER_LIMITS[newTier];
+
+  if (!limits) {
+    // Upgraded to enterprise - remove all limits
+    await unkey.keys.updateKey({
+      keyId,
+      ratelimits: [],
+    });
+    return;
+  }
+
+  // Update to new tier's limits
+  await unkey.keys.updateKey({
+    keyId,
+    ratelimits: [
+      {
+        name: "requests",
+        limit: limits.requests.limit,
+        duration: limits.requests.duration,
+        autoApply: true,
+      },
+      {
+        name: "tokens",
+        limit: limits.tokens.limit,
+        duration: limits.tokens.duration,
+      },
+    ],
+  });
+}
+```
+
+## Operation-specific limits
+
+Apply different limits to different endpoints:
+
+```typescript
+const OPERATION_LIMITS = {
+  "read": { name: "reads", cost: 1 },
+  "write": { name: "writes", cost: 2 },
+  "delete": { name: "deletes", cost: 3 },
+  "export": { name: "exports", cost: 10 },
+  "import": { name: "imports", cost: 10 },
+} as const;
+
+export async function createKeyWithOperationLimits() {
+  return await unkey.keys.create({
+    apiId: "api_...",
+    ratelimits: [
+      // General limit: 1000 requests/hour
+      {
+        name: "general",
+        limit: 1000,
+        duration: 3600000,
+        autoApply: true,
+      },
+      // Specific limits for heavy operations
+      {
+        name: "exports",
+        limit: 10,
+        duration: 3600000,  // Only 10 exports per hour
+      },
+      {
+        name: "imports",
+        limit: 10,
+        duration: 3600000,  // Only 10 imports per hour
+      },
+    ],
+  });
+}
+
+export async function handleOperation(
+  request: Request,
+  operation: keyof typeof OPERATION_LIMITS
+) {
+  const { name, cost } = OPERATION_LIMITS[operation];
+
+  const { data } = await verifyKey({
+    key: request.apiKey,
+    ratelimits: [
+      {
+        name,
+        cost,
+      },
+    ],
+  });
+
+  if (!data.valid) {
+    if (data.code === "RATE_LIMITED") {
+      return Response.json(
+        { error: `Rate limit exceeded for ${operation} operations` },
+        { status: 429 }
+      );
+    }
+    return Response.json({ error: data.code }, { status: 401 });
+  }
+
+  // Process the operation
+}
+```
+
+## Identity-level rate limits
+
+Share rate limits across all keys for a user/organization:
+
+```typescript
+// Create an identity with shared rate limits
+const { data: identity } = await unkey.identities.create({
+  externalId: "user_123",
+  ratelimits: [
+    {
+      name: "user-requests",
+      limit: 5000,
+      duration: 3600000,  // 5000 requests/hour across ALL keys
+    },
+  ],
+});
+
+// All keys linked to this identity share the limit
+const { data: key1 } = await unkey.keys.create({
+  apiId: "api_...",
+  externalId: "user_123",  // Links to the identity
+  name: "Production Key",
+});
+
+const { data: key2 } = await unkey.keys.create({
+  apiId: "api_...",
+  externalId: "user_123",  // Same identity
+  name: "Staging Key",
+});
+
+// Both keys share the 5000 requests/hour limit
+```
+
+<Note>
+Identity-level rate limits are perfect for **multi-tenant applications** where each organization should have a shared quota across all their API keys.
+</Note>
+
+## Temporary overrides
+
+Grant temporary rate limit increases:
+
+```typescript
+export async function grantTemporaryBoost(
+  keyId: string,
+  durationHours: number
+) {
+  // Get current limits
+  const key = await unkey.keys.get({ keyId });
+  const currentLimits = key.ratelimits;
+
+  // Double the limits temporarily
+  const boostedLimits = currentLimits.map((limit) => ({
+    ...limit,
+    limit: limit.limit * 2,
+  }));
+
+  // Apply boosted limits
+  await unkey.keys.updateKey({
+    keyId,
+    ratelimits: boostedLimits,
+  });
+
+  // Schedule restoration of original limits
+  await scheduleTask({
+    executeAt: Date.now() + durationHours * 60 * 60 * 1000,
+    task: async () => {
+      await unkey.keys.updateKey({
+        keyId,
+        ratelimits: currentLimits,
+      });
+    },
+  });
+
+  return {
+    boostedUntil: new Date(Date.now() + durationHours * 60 * 60 * 1000),
+  };
+}
+```
+
+## Bypass rate limits
+
+For internal or admin keys:
+
+```typescript
+// Create an admin key with no rate limits
+const { data } = await unkey.keys.create({
+  apiId: "api_...",
+  name: "Admin Key - No Limits",
+  meta: {
+    type: "admin",
+  },
+  // No ratelimits array = unlimited
+});
+
+// Or check in your application
+export async function verifyWithBypass(apiKey: string) {
+  const { data } = await verifyKey({ key: apiKey });
+
+  if (!data.valid) {
+    return { error: data.code };
+  }
+
+  // Check if this is an admin key
+  if (data.meta?.type === "admin") {
+    return { valid: true, bypassRateLimit: true };
+  }
+
+  return { valid: true, bypassRateLimit: false };
+}
+```
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Start conservative, then loosen">
+    Begin with strict rate limits and increase them based on actual usage patterns. Easier to give more than to take away.
+  </Accordion>
+  
+  <Accordion title="Use multiple named limits">
+    Don't lump everything into a single "requests" limit. Separate read/write operations, expensive queries, and bulk operations.
+  </Accordion>
+  
+  <Accordion title="Return helpful error messages">
+    When rate limited, tell users which limit they hit and when it resets. Include retry-after headers.
+  </Accordion>
+  
+  <Accordion title="Monitor limit usage">
+    Track how close customers are to their limits. Proactively suggest upgrades when they're hitting 80%.
+  </Accordion>
+</AccordionGroup>
+
+## Rate limit response headers
+
+Include rate limit information in your API responses:
+
+```typescript
+export async function handleRequest(request: Request) {
+  const { data } = await verifyKey({
+    key: request.apiKey,
+  });
+
+  if (!data.valid) {
+    if (data.code === "RATE_LIMITED") {
+      return new Response(
+        JSON.stringify({ error: "Rate limit exceeded" }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "X-RateLimit-Limit": "1000",
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": String(Math.floor(Date.now() / 1000) + 3600),
+            "Retry-After": "3600",
+          },
+        }
+      );
+    }
+    return Response.json({ error: data.code }, { status: 401 });
+  }
+
+  // Include rate limit info in successful responses
+  const response = await processRequest(request);
+  
+  return new Response(JSON.stringify(response), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "X-RateLimit-Limit": "1000",
+      "X-RateLimit-Remaining": String(data.ratelimit?.remaining ?? 0),
+    },
+  });
+}
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Multi-tenant applications" icon="building" href="/advanced/multi-tenant">
+    Share rate limits across organizations
+  </Card>
+  <Card title="Usage limits" icon="calculator" href="/advanced/usage-limits">
+    Combine rate limits with credit-based quotas
+  </Card>
+</CardGroup>

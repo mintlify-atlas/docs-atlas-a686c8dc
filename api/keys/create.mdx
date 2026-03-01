@@ -1,0 +1,358 @@
+---
+title: Create API Key
+description: Create a new API key for user authentication and authorization
+---
+
+Create a new API key for user authentication and authorization.
+
+Use this endpoint when users sign up, upgrade subscription tiers, or need additional keys. Keys are cryptographically secure and unique to the specified API namespace.
+
+**Important**: The key is returned only once. Store it immediately and provide it to your user, as it cannot be retrieved later.
+
+## Common Use Cases
+
+- Generate keys for new user registrations
+- Create additional keys for different applications
+- Issue keys with specific permissions or limits
+
+## Required Permissions
+
+Your root key needs one of:
+- `api.*.create_key` (create keys in any API)
+- `api.<api_id>.create_key` (create keys in specific API)
+
+## Request
+
+<ParamField body="apiId" type="string" required>
+  The API namespace this key belongs to. Keys from different APIs cannot access each other.
+  
+  **Pattern**: `^[a-zA-Z0-9_]+$`
+  
+  **Example**: `api_1234abcd`
+</ParamField>
+
+<ParamField body="prefix" type="string">
+  Adds a visual identifier to the beginning of the generated key for easier recognition in logs and dashboards. The prefix becomes part of the actual key string (e.g., `prod_xxxxxxxxx`).
+  
+  Avoid using sensitive information in prefixes as they may appear in logs and error messages.
+  
+  **Length**: 1-16 characters
+  
+  **Pattern**: `^[a-zA-Z0-9_]+$`
+  
+  **Example**: `prod`
+</ParamField>
+
+<ParamField body="name" type="string">
+  Sets a human-readable identifier for internal organization and dashboard display. Never exposed to end users, only visible in management interfaces and API responses.
+  
+  Avoid generic names like "API Key" when managing multiple keys for the same user or service.
+  
+  **Length**: 1-255 characters
+  
+  **Example**: `Payment Service Production Key`
+</ParamField>
+
+<ParamField body="byteLength" type="integer" default="16">
+  Controls the cryptographic strength of the generated key in bytes. Higher values increase security but result in longer keys.
+  
+  The default 16 bytes provides 2^128 possible combinations, sufficient for most applications. Consider 32 bytes for highly sensitive APIs.
+  
+  **Range**: 16-255
+  
+  **Example**: `24`
+</ParamField>
+
+<ParamField body="externalId" type="string">
+  Links this key to a user or entity in your system using your own identifier. Returned during verification to identify the key owner without additional database lookups.
+  
+  Essential for user-specific analytics, billing, and multi-tenant key management. Use your primary user ID, organization ID, or tenant ID for best results.
+  
+  **Length**: 1-255 characters
+  
+  **Pattern**: `^[a-zA-Z0-9_.-]+$`
+  
+  **Example**: `user_1234abcd`
+</ParamField>
+
+<ParamField body="meta" type="object">
+  Stores arbitrary JSON metadata returned during key verification for contextual information. Eliminates additional database lookups during verification, improving performance for stateless services.
+  
+  Avoid storing sensitive data here as it's returned in verification responses. Large metadata objects increase verification latency and should stay under 10KB total size.
+  
+  **Example**:
+  ```json
+  {
+    "plan": "enterprise",
+    "featureFlags": {
+      "betaAccess": true,
+      "concurrentConnections": 10
+    },
+    "customerName": "Acme Corp",
+    "billing": {
+      "tier": "premium",
+      "renewal": "2024-12-31"
+    }
+  }
+  ```
+</ParamField>
+
+<ParamField body="roles" type="array">
+  Assigns existing roles to this key for permission management through role-based access control. Roles must already exist in your workspace before assignment.
+  
+  During verification, all permissions from assigned roles are checked against requested permissions.
+  
+  **Example**: `["api_admin", "billing_reader"]`
+</ParamField>
+
+<ParamField body="permissions" type="array">
+  Grants specific permissions directly to this key without requiring role membership. Wildcard permissions like `documents.*` grant access to all sub-permissions including `documents.read` and `documents.write`.
+  
+  Direct permissions supplement any permissions inherited from assigned roles.
+  
+  **Example**: `["documents.read", "documents.write", "settings.view"]`
+</ParamField>
+
+<ParamField body="expires" type="integer">
+  Sets when this key automatically expires as a Unix timestamp in milliseconds. Verification fails with `code=EXPIRED` immediately after this time passes.
+  
+  Omitting this field creates a permanent key that never expires. Keys expire based on server time, not client time, which prevents timezone-related issues.
+  
+  Essential for trial periods, temporary access, and security compliance requiring key rotation.
+  
+  **Example**: `1704067200000`
+</ParamField>
+
+<ParamField body="credits" type="object">
+  Controls usage-based limits through credit consumption with optional automatic refills. Unlike rate limits which control frequency, credits control total usage with global consistency.
+  
+  Essential for implementing usage-based pricing, subscription tiers, and hard usage quotas.
+  
+  <ParamField body="remaining" type="integer">
+    The initial number of credits available for this key.
+  </ParamField>
+  
+  <ParamField body="refill" type="object">
+    Configuration for automatic credit refills.
+    
+    <ParamField body="interval" type="string">
+      How often credits are refilled. Options: `daily`, `monthly`
+    </ParamField>
+    
+    <ParamField body="amount" type="integer">
+      Number of credits to add on each refill.
+    </ParamField>
+    
+    <ParamField body="refillDay" type="integer">
+      Day of the month for monthly refills (1-31). Only applicable when interval is `monthly`.
+    </ParamField>
+  </ParamField>
+</ParamField>
+
+<ParamField body="ratelimits" type="array">
+  Defines time-based rate limits that protect against abuse by controlling request frequency. Unlike credits which track total usage, rate limits reset automatically after each window expires.
+  
+  Multiple rate limits can control different operation types with separate thresholds and windows.
+  
+  **Example**:
+  ```json
+  [
+    {
+      "name": "requests",
+      "limit": 100,
+      "duration": 60000,
+      "autoApply": true
+    },
+    {
+      "name": "heavy_operations",
+      "limit": 10,
+      "duration": 3600000,
+      "autoApply": false
+    }
+  ]
+  ```
+</ParamField>
+
+<ParamField body="enabled" type="boolean" default="true">
+  Controls whether the key is active immediately upon creation. When set to `false`, the key exists but all verification attempts fail with `code=DISABLED`.
+  
+  Useful for pre-creating keys that will be activated later or for keys requiring manual approval.
+</ParamField>
+
+<ParamField body="recoverable" type="boolean" default="false">
+  Controls whether the plaintext key is stored in an encrypted vault for later retrieval. When true, allows recovering the actual key value using `keys.getKey` with `decrypt=true`.
+  
+  When false, the key value cannot be retrieved after creation for maximum security. Only enable for development keys or when key recovery is absolutely necessary.
+</ParamField>
+
+## Response
+
+<ResponseField name="keyId" type="string" required>
+  The unique identifier for this key in Unkey's system. This is NOT the actual API key, but a reference ID used for management operations like updating or deleting the key.
+  
+  Store this ID in your database to reference the key later. This ID is not sensitive and can be logged or displayed in dashboards.
+  
+  **Example**: `key_2cGKbMxRyIzhCxo1Idjz8q`
+</ResponseField>
+
+<ResponseField name="key" type="string" required>
+  The full generated API key that should be securely provided to your user.
+  
+  **SECURITY WARNING**: This is the only time you'll receive the complete key - Unkey only stores a securely hashed version. Never log or store this value in your own systems; provide it directly to your end user via secure channels. After this API call completes, this value cannot be retrieved again (unless created with `recoverable=true`).
+  
+  **Example**: `prod_2cGKbMxRjIzhCxo1IdjH3arELti7Sdyc8w6XYbvtcyuBowPT`
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.createKey \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiId": "api_1234abcd",
+    "name": "User API key",
+    "externalId": "user_123"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const created = await unkey.keys.create({
+  apiId: "api_1234abcd",
+  name: "User API key",
+  externalId: "user_123",
+});
+
+console.log(created.result.keyId);
+console.log(created.result.key); // Store this securely!
+```
+
+```python Python
+import os
+import requests
+
+response = requests.post(
+    "https://api.unkey.com/v2/keys.createKey",
+    headers={
+        "Authorization": f"Bearer {os.environ['UNKEY_ROOT_KEY']}",
+        "Content-Type": "application/json"
+    },
+    json={
+        "apiId": "api_1234abcd",
+        "name": "User API key",
+        "externalId": "user_123"
+    }
+)
+
+result = response.json()
+print(result["data"]["keyId"])
+print(result["data"]["key"])  # Store this securely!
+```
+
+```go Go
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/unkeyed/unkey-go"
+	"github.com/unkeyed/unkey-go/models/components"
+)
+
+func main() {
+	uk := unkey.New(
+		unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+	)
+
+	ctx := context.Background()
+	res, err := uk.Keys.CreateKey(ctx, &components.V2KeysCreateKeyRequestBody{
+		ApiID: "api_1234abcd",
+		Name:  unkey.String("User API key"),
+		ExternalID: unkey.String("user_123"),
+	})
+
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(res.Data.KeyID)
+	fmt.Println(res.Data.Key) // Store this securely!
+}
+```
+</CodeGroup>
+
+### With Permissions and Rate Limits
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.createKey \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiId": "api_1234abcd",
+    "name": "Service API key",
+    "externalId": "service_456",
+    "permissions": ["documents.read", "documents.write"],
+    "credits": {
+      "remaining": 1000
+    },
+    "ratelimits": [{
+      "name": "api_requests",
+      "limit": 100,
+      "duration": 60000
+    }],
+    "meta": {
+      "service": "document_processor",
+      "version": "1.0"
+    }
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const created = await unkey.keys.create({
+  apiId: "api_1234abcd",
+  name: "Service API key",
+  externalId: "service_456",
+  permissions: ["documents.read", "documents.write"],
+  credits: {
+    remaining: 1000,
+  },
+  ratelimits: [{
+    name: "api_requests",
+    limit: 100,
+    duration: 60000,
+  }],
+  meta: {
+    service: "document_processor",
+    version: "1.0",
+  },
+});
+
+console.log(created.result);
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_abc123def456"
+  },
+  "data": {
+    "keyId": "key_1234abcd",
+    "key": "sk_1234abcdef567890"
+  }
+}
+```

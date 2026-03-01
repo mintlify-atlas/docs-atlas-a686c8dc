@@ -1,0 +1,491 @@
+---
+title: Audit Logs
+description: Track every change to your API keys, permissions, and configuration for security, compliance, and debugging
+---
+
+Audit logs capture every mutation in your Unkey workspace — key creation, permission changes, revocations, rate limit updates, and more. They're essential for security investigations, compliance requirements, and understanding who changed what and when.
+
+## Why Audit Logs Matter
+
+<CardGroup cols={2}>
+  <Card title="Security investigations" icon="magnifying-glass">
+    When something goes wrong, trace exactly what happened, when, and who was responsible.
+  </Card>
+  <Card title="Compliance requirements" icon="file-shield">
+    SOC 2, HIPAA, GDPR, and other frameworks require audit trails for sensitive operations.
+  </Card>
+  <Card title="Team visibility" icon="users">
+    Know when team members create, modify, or revoke keys — especially critical in shared workspaces.
+  </Card>
+  <Card title="Debugging" icon="bug">
+    Figure out why a key stopped working, when a permission was changed, or who updated configuration.
+  </Card>
+</CardGroup>
+
+## What Gets Logged
+
+Unkey automatically logs every mutation operation. **Read operations are not logged** — only actions that create, update, or delete resources.
+
+### Logged Events by Category
+
+<Tabs>
+  <Tab title="API Keys">
+    | Event | Description |
+    |-------|-------------|
+    | `key.create` | A new API key is created |
+    | `key.update` | Key properties are modified (name, metadata, limits, etc.) |
+    | `key.delete` | A key is permanently deleted |
+    | `key.reroll` | A key is replaced with a new value while preserving config |
+  </Tab>
+  <Tab title="APIs">
+    | Event | Description |
+    |-------|-------------|
+    | `api.create` | A new API container is created |
+    | `api.update` | API settings are modified |
+    | `api.delete` | An API is deleted |
+  </Tab>
+  <Tab title="Identities">
+    | Event | Description |
+    |-------|-------------|
+    | `identity.create` | A new identity is created |
+    | `identity.update` | Identity metadata or rate limits are updated |
+    | `identity.delete` | An identity is deleted |
+  </Tab>
+  <Tab title="Authorization">
+    | Event | Description |
+    |-------|-------------|
+    | `role.create` | A new role is created |
+    | `role.update` | Role properties are modified |
+    | `role.delete` | A role is deleted |
+    | `permission.create` | A new permission is created |
+    | `permission.update` | Permission properties are modified |
+    | `permission.delete` | A permission is deleted |
+    | `authorization.connect_role_and_permission` | A permission is added to a role |
+    | `authorization.disconnect_role_and_permission` | A permission is removed from a role |
+    | `authorization.connect_role_and_key` | A role is assigned to a key |
+    | `authorization.disconnect_role_and_key` | A role is removed from a key |
+    | `authorization.connect_permission_and_key` | A permission is assigned directly to a key |
+    | `authorization.disconnect_permission_and_key` | A permission is removed from a key |
+  </Tab>
+  <Tab title="Rate Limiting">
+    | Event | Description |
+    |-------|-------------|
+    | `ratelimitNamespace.create` | A rate limit namespace is created |
+    | `ratelimitNamespace.update` | Namespace settings are updated |
+    | `ratelimitNamespace.delete` | A namespace is deleted |
+    | `ratelimit.create` | A rate limit configuration is created |
+    | `ratelimit.update` | Rate limit settings are modified |
+    | `ratelimit.delete` | A rate limit is removed |
+    | `ratelimit.set_override` | A custom override is set for an identifier |
+    | `ratelimit.delete_override` | An override is removed |
+  </Tab>
+  <Tab title="Workspace">
+    | Event | Description |
+    |-------|-------------|
+    | `workspace.create` | A new workspace is created |
+    | `workspace.update` | Workspace settings are changed |
+    | `workspace.delete` | A workspace is deleted |
+    | `workspace.opt_in` | A feature flag is enabled |
+  </Tab>
+  <Tab title="Webhooks">
+    | Event | Description |
+    |-------|-------------|
+    | `webhook.create` | A webhook endpoint is created |
+    | `webhook.update` | Webhook configuration is updated |
+    | `webhook.delete` | A webhook is deleted |
+  </Tab>
+</Tabs>
+
+<Note>
+Verification events (key.verify) are tracked in [Analytics](/features/analytics), not audit logs. Audit logs focus on configuration changes, not runtime operations.
+</Note>
+
+## Accessing Audit Logs
+
+### Dashboard
+
+<Steps>
+  <Step title="Navigate to Audit Logs">
+    Sign into [app.unkey.com](https://app.unkey.com) and click **Audit Logs** in the sidebar
+  </Step>
+  <Step title="Browse events">
+    See a chronological list of all workspace mutations
+  </Step>
+  <Step title="Click for details">
+    Click any row to see complete request/response payloads and metadata
+  </Step>
+</Steps>
+
+<Frame>
+  <img src="/audit-log/audit-log.png" alt="Audit log list view"/>
+</Frame>
+
+### Log Entry Details
+
+Each audit log entry contains:
+
+| Field | Description |
+|-------|-------------|
+| **Time** | Precise timestamp when the change occurred (ISO 8601 format) |
+| **Actor** | Who made the change — a user (via dashboard) or root key (via API) |
+| **Action** | The operation type: `Create`, `Update`, `Delete`, etc. |
+| **Event** | What was affected: `key`, `permission`, `api`, `identity`, etc. |
+| **Resource ID** | The ID of the affected resource (key ID, API ID, etc.) |
+| **Description** | Human-readable summary of the change |
+| **Request** | Full request payload (what was sent) |
+| **Response** | Full response payload (what was returned) |
+| **Metadata** | Additional context (IP address, user agent, etc.) |
+
+<Frame>
+  <img src="/audit-log/audit-workspace-details.png" alt="Detailed audit log view"/>
+</Frame>
+
+## Filtering Audit Logs
+
+Use filters at the top of the audit log page to narrow down results:
+
+<Tabs>
+  <Tab title="By Event Type">
+    Filter by specific event categories:
+    - **Keys**: Only key-related events
+    - **Permissions**: Authorization changes
+    - **Rate Limits**: Rate limit configuration
+    - **Workspace**: Workspace-level changes
+
+    Useful for tracking specific types of changes.
+  </Tab>
+  <Tab title="By Actor">
+    See who made changes:
+    - **Specific user**: Filter by email or user ID
+    - **Specific root key**: Filter by root key ID
+    - **API vs Dashboard**: Distinguish between automated and manual changes
+
+    Useful for auditing team member actions.
+  </Tab>
+  <Tab title="By Time Range">
+    Focus on specific periods:
+    - Last 24 hours
+    - Last 7 days
+    - Last 30 days
+    - Custom date range
+
+    Useful for incident investigations.
+  </Tab>
+  <Tab title="By Resource">
+    Filter by specific resource IDs:
+    - Specific key ID
+    - Specific API ID
+    - Specific identity
+
+    Useful for tracking changes to a particular resource.
+  </Tab>
+</Tabs>
+
+## Common Use Cases
+
+<AccordionGroup>
+  <Accordion title="Security incident investigation" icon="shield-exclamation">
+    **Scenario**: A key was compromised and you need to understand the blast radius.
+
+    <Steps>
+      <Step title="Find when the key was created">
+        Filter logs by `key.create` and search for the key ID
+      </Step>
+      <Step title="Check if it was modified">
+        Look for `key.update` events — was it given extra permissions?
+      </Step>
+      <Step title="See who had access">
+        Check the actor field — was it created via API or dashboard?
+      </Step>
+      <Step title="Verify revocation">
+        Confirm `key.delete` or `key.update` (enabled=false) event exists
+      </Step>
+    </Steps>
+
+    **Export evidence**: Click "Export" to download logs for security reports.
+  </Accordion>
+  
+  <Accordion title="Compliance auditing" icon="file-shield">
+    **Scenario**: Annual SOC 2 audit requires proof of access controls.
+
+    Generate reports showing:
+    - All permission changes in the audit period
+    - Who granted/revoked access
+    - When keys were created/deleted
+    - Rate limit policy changes
+
+    <Tabs>
+      <Tab title="Permission Changes">
+        Filter by:
+        - `permission.create`
+        - `permission.delete`
+        - `authorization.*`
+
+        Export as CSV for auditor review.
+      </Tab>
+      <Tab title="Key Lifecycle">
+        Filter by:
+        - `key.create`
+        - `key.delete`
+
+        Show complete key lifecycle documentation.
+      </Tab>
+    </Tabs>
+  </Accordion>
+  
+  <Accordion title="Debugging configuration issues" icon="bug">
+    **Scenario**: A key suddenly stopped working and the user claims they didn't change anything.
+
+    <Steps>
+      <Step title="Search for the key ID">
+        Filter audit logs by resource ID
+      </Step>
+      <Step title="Look for recent changes">
+        Check for `key.update` events in the past 7 days
+      </Step>
+      <Step title="Identify the change">
+        Common culprits:
+        - `enabled` set to `false`
+        - `expires` timestamp in the past
+        - Rate limit reduced to 0
+        - Permission removed
+      </Step>
+      <Step title="Check who made the change">
+        Was it a team member, API call, or automated process?
+      </Step>
+    </Steps>
+  </Accordion>
+  
+  <Accordion title="Team activity monitoring" icon="users">
+    **Scenario**: You want to see what your team has been doing this week.
+
+    Filter by:
+    - Time range: Last 7 days
+    - Actor: Each team member
+
+    Useful for:
+    - Onboarding review (did new hire create test keys?)
+    - Activity verification (is contractor still making changes?)
+    - Change management (what changed during the deployment?)
+  </Accordion>
+  
+  <Accordion title="Automated system changes" icon="robot">
+    **Scenario**: Track changes made by automated systems or CI/CD.
+
+    Filter by:
+    - Actor: Specific root key ID used by automation
+
+    Monitor:
+    - Are automated deploys creating/updating keys correctly?
+    - Did the migration script run successfully?
+    - Are rate limits being set programmatically as expected?
+  </Accordion>
+</AccordionGroup>
+
+## Log Retention
+
+Audit logs are retained based on your plan:
+
+| Plan | Retention Period | Export |
+|------|------------------|--------|
+| **Free** | 7 days | ✓ |
+| **Pro** | 90 days | ✓ |
+| **Enterprise** | Custom (up to unlimited) | ✓ with custom formats |
+
+<Warning>
+After the retention period, logs are permanently deleted and cannot be recovered. Export logs regularly if you need longer retention.
+</Warning>
+
+### Exporting Logs
+
+<Tabs>
+  <Tab title="Dashboard Export">
+    1. Apply desired filters
+    2. Click **Export** button
+    3. Choose format: CSV or JSON
+    4. Download begins automatically
+
+    Exports include all filtered events with complete payloads.
+  </Tab>
+  <Tab title="API Export (Enterprise)">
+    ```typescript
+    // Query audit logs programmatically
+    const response = await fetch("https://api.unkey.com/v1/auditlog.list", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.UNKEY_ROOT_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        workspaceId: "ws_...",
+        start: Date.now() - 30 * 24 * 60 * 60 * 1000,
+        end: Date.now(),
+        eventType: "key.*"
+      })
+    });
+
+    const logs = await response.json();
+    ```
+  </Tab>
+  <Tab title="Continuous Export (Enterprise)">
+    Stream audit logs to external systems:
+    - **S3**: Long-term archival
+    - **Datadog**: SIEM integration
+    - **Splunk**: Security monitoring
+    - **BigQuery**: Analytics warehouse
+
+    Contact [support@unkey.com](mailto:support@unkey.com) to set up.
+  </Tab>
+</Tabs>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Review logs regularly" icon="calendar-check">
+    Check audit logs weekly for unusual activity:
+    - Unexpected deletions
+    - Permission escalations
+    - Bulk changes
+    - Off-hours modifications
+  </Card>
+  <Card title="Use root keys sparingly" icon="key">
+    Root keys have full workspace access. Create narrow-scoped root keys for automation:
+    ```typescript
+    // Good: Limited scope
+    permissions: ["key.create", "key.update"]
+
+    // Bad: Full access
+    permissions: ["*"]
+    ```
+  </Card>
+  <Card title="Export for compliance" icon="file-export">
+    If you need logs older than your retention period:
+    - Set up automated monthly exports
+    - Store in S3 or compliance vault
+    - Include in annual audit packages
+  </Card>
+  <Card title="Name root keys descriptively" icon="tag">
+    When creating root keys, use clear names:
+    - `CI/CD Production Deploy`
+    - `Stripe Webhook Handler`
+    - `Analytics Export Script`
+    
+    Makes audit logs much easier to understand.
+  </Card>
+  <Card title="Monitor for bulk changes" icon="layer-group">
+    Set up alerts for:
+    - >10 keys deleted in 1 hour
+    - >50 keys created in 1 hour
+    - Mass permission changes
+    
+    Could indicate compromise or runaway script.
+  </Card>
+  <Card title="Document procedures" icon="book">
+    Create runbooks for:
+    - How to investigate security incidents
+    - Where to find specific log types
+    - Export procedures for auditors
+    - Retention policy documentation
+  </Card>
+</CardGroup>
+
+## Audit Log vs Analytics
+
+Understand the difference:
+
+| Feature | Audit Logs | Analytics |
+|---------|-----------|------------|
+| **Purpose** | Track configuration changes | Track runtime usage |
+| **Events** | Create, update, delete | Key verifications |
+| **Volume** | Low (only mutations) | High (every API call) |
+| **Retention** | 7-90+ days | 7-90+ days |
+| **Use for** | Security, compliance, debugging | Usage patterns, billing, optimization |
+
+**Both are important:**
+- Audit logs answer "who changed what?"
+- Analytics answer "how is it being used?"
+
+## Security Considerations
+
+<AccordionGroup>
+  <Accordion title="Audit logs are immutable" icon="lock">
+    Once created, audit log entries cannot be modified or deleted by users. This ensures integrity for compliance and security investigations.
+  </Accordion>
+  
+  <Accordion title="Actor attribution" icon="user">
+    Every change is attributed to:
+    - **User**: Dashboard changes show user email
+    - **Root key**: API changes show root key ID and name
+    
+    Never share root keys between systems — create separate keys for accurate attribution.
+  </Accordion>
+  
+  <Accordion title="Request/response payloads" icon="code">
+    Full payloads are captured, which may include:
+    - Key values (only on creation)
+    - Metadata
+    - Configuration
+    
+    **Never put secrets in metadata or key names.**
+  </Accordion>
+  
+  <Accordion title="Data privacy" icon="shield-check">
+    For GDPR/CCPA compliance:
+    - Don't store PII in key names or metadata
+    - Request deletion via [support@unkey.com](mailto:support@unkey.com)
+    - Logs for deleted resources remain (shows deletion event)
+  </Accordion>
+</AccordionGroup>
+
+## Enterprise Features
+
+<Note>
+Enterprise plans include advanced audit log capabilities. [Contact us](mailto:support@unkey.com) to learn more.
+</Note>
+
+<CardGroup cols={2}>
+  <Card title="Extended retention" icon="clock">
+    Keep logs for years, not days:
+    - 1 year standard
+    - Multi-year available
+    - Unlimited retention for regulated industries
+  </Card>
+  <Card title="SIEM integration" icon="network-wired">
+    Stream logs to security tools:
+    - Datadog
+    - Splunk
+    - Sumo Logic
+    - Custom webhooks
+  </Card>
+  <Card title="Advanced filtering" icon="filter">
+    More powerful queries:
+    - Regex search
+    - Complex boolean logic
+    - Custom field matching
+    - SQL-like queries
+  </Card>
+  <Card title="Compliance reports" icon="file-contract">
+    Automated report generation:
+    - SOC 2 evidence
+    - HIPAA audit trails
+    - Custom compliance formats
+    - Scheduled exports
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Analytics" icon="chart-line" href="/features/analytics">
+    Track key usage and verification patterns
+  </Card>
+  <Card title="Security Overview" icon="shield" href="/security/overview">
+    Learn how Unkey protects your data
+  </Card>
+  <Card title="Root Keys" icon="key" href="/security/root-keys">
+    Create and manage root keys for API access
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/v2/overview">
+    Complete API documentation
+  </Card>
+</CardGroup>

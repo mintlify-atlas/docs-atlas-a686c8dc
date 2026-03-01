@@ -1,0 +1,97 @@
+---
+title: 'Update Identity'
+description: "Update an identity's metadata and rate limits"
+---
+
+## POST /v2/identities.updateIdentity
+
+Update an identity's metadata and rate limits. Only specified fields are modified - others remain unchanged. Perfect for subscription changes, plan upgrades, or updating user information. Changes take effect immediately.
+
+**Important**: Rate limit changes propagate within 30 seconds.
+
+### Required Permissions
+
+Requires `identity.*.update_identity` permission
+
+### Request
+
+<ParamField body="identity" type="string" required>
+  The ID of the identity to update. Accepts either the externalId (your system-generated identifier) or the identityId (internal identifier returned by the identity service).
+  
+  Example: `user_123`
+</ParamField>
+
+<ParamField body="meta" type="object">
+  Replaces all existing metadata with this new metadata object. Omitting this field preserves existing metadata, while providing an empty object clears all metadata.
+  
+  **Important**: Avoid storing sensitive data here as it's returned in verification responses. Large metadata objects increase verification latency and should stay under 10KB total size.
+  
+  - Maximum 100 properties
+  
+  Example:
+  ```json
+  {
+    "name": "Alice Smith",
+    "email": "alice@example.com",
+    "plan": "premium"
+  }
+  ```
+</ParamField>
+
+<ParamField body="ratelimits" type="array">
+  Replaces all existing identity rate limits with this complete list of rate limits. Omitting this field preserves existing rate limits, while providing an empty array removes all rate limits.
+  
+  These limits are shared across all keys belonging to this identity, preventing abuse through multiple keys. Rate limit changes take effect immediately but may take up to 30 seconds to propagate across all regions.
+  
+  - Maximum 50 rate limits
+  
+  Example:
+  ```json
+  [
+    {
+      "name": "requests",
+      "limit": 1000,
+      "duration": 3600000,
+      "autoApply": true
+    }
+  ]
+  ```
+</ParamField>
+
+### Response
+
+Returns an empty data object on successful update.
+
+### Example
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/identities.updateIdentity \
+  -H "Authorization: Bearer <your-root-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "identity": "user_123",
+    "meta": {
+      "name": "Alice Smith",
+      "email": "alice@example.com",
+      "plan": "premium"
+    }
+  }'
+```
+
+```json Response
+{
+  "meta": {
+    "requestId": "req_2cGKbMxRyIzhCxo1Idjz8q"
+  },
+  "data": {}
+}
+```
+
+### Error Codes
+
+- `400` - Bad request (invalid parameters)
+- `401` - Unauthorized (missing or invalid root key)
+- `403` - Forbidden (insufficient permissions - requires `identity.*.update_identity`)
+- `404` - Not found (identity with the specified ID or externalId doesn't exist)
+- `429` - Too many requests (rate limit exceeded)
+- `500` - Internal server error

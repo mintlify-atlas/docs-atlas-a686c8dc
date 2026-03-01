@@ -1,0 +1,165 @@
+---
+title: 'List API Keys'
+description: 'Retrieve a paginated list of API keys for dashboard and administrative interfaces'
+---
+
+## POST /v2/apis.listKeys
+
+Retrieve a paginated list of API keys for dashboard and administrative interfaces. Use this to build key management dashboards, filter keys by user with `externalId`, or retrieve key details for administrative purposes. Each key includes status, metadata, permissions, and usage limits.
+
+**Important**: Set `decrypt: true` only in secure contexts to retrieve plaintext key values from recoverable keys.
+
+### Required Permissions
+
+Your root key must have one of the following permissions for basic key listing:
+- `api.*.read_key` (to read keys from any API)
+- `api.<api_id>.read_key` (to read keys from a specific API)
+
+Additionally, you need read access to the API itself:
+- `api.*.read_api` or `api.<api_id>.read_api`
+
+Additional permission required for decrypt functionality:
+- `api.*.decrypt_key` or `api.<api_id>.decrypt_key`
+
+### Request
+
+<ParamField body="apiId" type="string" required>
+  The API namespace whose keys you want to list. Returns all keys in this API, subject to pagination and filters.
+  
+  Example: `api_1234abcd`
+</ParamField>
+
+<ParamField body="limit" type="integer" default="100">
+  Maximum number of keys to return per request. Balance between response size and number of pagination calls needed.
+  
+  - Minimum: 1
+  - Maximum: 100
+</ParamField>
+
+<ParamField body="cursor" type="string">
+  Pagination cursor from previous response to fetch next page. Use when `hasMore: true` in previous response.
+  
+  Example: `key_1234abcd`
+</ParamField>
+
+<ParamField body="externalId" type="string">
+  Filter keys by external ID to find keys for a specific user or entity. Must exactly match the externalId set during key creation.
+  
+  Example: `user_1234abcd`
+</ParamField>
+
+<ParamField body="decrypt" type="boolean" default="false">
+  When true, attempts to include the plaintext key value in the response.
+  
+  **SECURITY WARNING**:
+  - This requires special permissions on the calling root key
+  - Only works for keys created with 'recoverable: true'
+  - Exposes sensitive key material in the response
+  - Should only be used in secure administrative contexts
+  - Never enable this in user-facing applications
+</ParamField>
+
+<ParamField body="revalidateKeysCache" type="boolean" default="false">
+  **EXPERIMENTAL**: Skip the cache and fetch the keys directly from the database. This ensures you see the most recent state, including keys created moments ago.
+  
+  Use this when:
+  - You've just created a key and need to display it immediately
+  - You need absolute certainty about the current key state
+  - You're debugging cache consistency issues
+  
+  This parameter comes with a performance cost and should be used sparingly.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="array" required>
+  Array of API keys with complete configuration and metadata. Each key object includes:
+  
+  - `keyId` - Unique key identifier
+  - `start` - Key prefix (first few characters)
+  - `enabled` - Whether the key is active
+  - `name` - Human-readable key name
+  - `createdAt` - Creation timestamp
+  - `expires` - Expiration timestamp (if set)
+  - `meta` - Custom metadata object
+  - `permissions` - Array of permission strings
+  - `roles` - Array of role names
+  - `credits` - Credits configuration and remaining balance
+  - `identity` - Associated identity information
+  - `plaintext` - Plaintext key value (only when decrypt=true and key is recoverable)
+</ResponseField>
+
+<ResponseField name="pagination" type="object">
+  Pagination metadata for fetching additional results.
+  
+  - `cursor` - Token for requesting the next page
+  - `hasMore` - Whether more results are available
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/apis.listKeys \
+  -H "Authorization: Bearer <your-root-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiId": "api_1234abcd",
+    "limit": 50
+  }'
+```
+
+```json Response
+{
+  "meta": {
+    "requestId": "req_1234abcd"
+  },
+  "data": [
+    {
+      "keyId": "key_1234abcd",
+      "start": "sk_prod",
+      "enabled": true,
+      "name": "Production API Key",
+      "createdAt": 1704067200000,
+      "expires": 1735689600000,
+      "meta": {
+        "plan": "premium",
+        "userId": "user_5678"
+      },
+      "permissions": [
+        "documents.read",
+        "documents.write"
+      ],
+      "roles": [
+        "editor"
+      ],
+      "credits": {
+        "remaining": 8500,
+        "refill": {
+          "amount": 10000,
+          "interval": "monthly",
+          "refillDay": 1
+        }
+      },
+      "identity": {
+        "externalId": "user_5678",
+        "meta": {
+          "plan": "premium"
+        }
+      }
+    }
+  ],
+  "pagination": {
+    "cursor": "key_5678efgh",
+    "hasMore": false
+  }
+}
+```
+
+### Error Codes
+
+- `400` - Bad request (invalid parameters)
+- `401` - Unauthorized (missing or invalid root key)
+- `403` - Forbidden (insufficient permissions)
+- `404` - Not found (API does not exist)
+- `429` - Too many requests (rate limit exceeded)
+- `500` - Internal server error

@@ -1,0 +1,57 @@
+---
+title: 'Delete Identity'
+description: 'Permanently delete an identity'
+---
+
+## POST /v2/identities.deleteIdentity
+
+Permanently delete an identity. This operation cannot be undone. Use this for data cleanup, compliance requirements, or when removing entities from your system.
+
+**Important**:
+- Associated API keys remain functional but lose shared resources
+- External ID becomes available for reuse immediately
+
+### Required Permissions
+
+Requires `identity.*.delete_identity` permission
+
+### Request
+
+<ParamField body="identity" type="string" required>
+  The ID of the identity to delete. Accepts either the externalId or the identityId.
+  
+  Example: `user_123`
+</ParamField>
+
+### Response
+
+Returns an empty data object on successful deletion.
+
+### Example
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/identities.deleteIdentity \
+  -H "Authorization: Bearer <your-root-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "identity": "user_123"
+  }'
+```
+
+```json Response
+{
+  "meta": {
+    "requestId": "req_01H9TQPP77V5E48E9SH0BG0ZQX"
+  },
+  "data": {}
+}
+```
+
+### Error Codes
+
+- `400` - Bad request (invalid parameters)
+- `401` - Unauthorized (missing or invalid root key)
+- `403` - Forbidden (insufficient permissions - requires `identity.*.delete_identity`)
+- `404` - Not found (identity with the specified externalId doesn't exist)
+- `429` - Too many requests (rate limit exceeded)
+- `500` - Internal server error

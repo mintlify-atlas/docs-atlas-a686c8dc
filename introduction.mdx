@@ -1,0 +1,142 @@
+---
+title: What is Unkey?
+description: The API development platform for modern teams
+---
+
+Unkey is the API development platform that handles the infrastructure you'd rather not build yourself: **API key management**, **rate limiting**, and **usage tracking** — all with global performance and zero servers to manage.
+
+<CardGroup cols={3}>
+  <Card title="API Keys" icon="key">
+    Issue, verify, and revoke keys with metadata, expiration, and usage limits built in.
+  </Card>
+  <Card title="Rate Limiting" icon="gauge-high">
+    Protect any endpoint from abuse — standalone or attached to API keys.
+  </Card>
+  <Card title="Usage Tracking" icon="chart-line">
+    Know who's using your API, how much, and when — with analytics out of the box.
+  </Card>
+</CardGroup>
+
+## Why Unkey?
+
+Building API infrastructure from scratch means managing databases, Redis clusters, edge caching, and analytics pipelines. Unkey handles all of that so you can focus on your actual product.
+
+| DIY Approach | With Unkey |
+|--------------|------------|
+| Set up key storage, hashing, rotation | `unkey.keys.create()` |
+| Deploy Redis for rate limiting | `unkey.ratelimit.limit()` |
+| Build usage tracking & dashboards | Built-in analytics |
+| Manage infrastructure globally | Globally distributed |
+
+<Note>
+Unkey never stores your API keys in plain text. We hash them before storage, so even if our database were compromised, your keys stay safe.
+</Note>
+
+## What can you build?
+
+<AccordionGroup>
+  <Accordion title="Protect a public API" icon="shield-halved">
+    Issue API keys to your users, verify them on every request, and automatically reject invalid or expired keys.
+    
+    ```ts
+    const { meta, data } = await unkey.keys.verify({ key: "sk_123..." });
+    if (!data.valid) return new Response("Unauthorized", { status: 401 });
+    ```
+  </Accordion>
+  
+  <Accordion title="Rate limit anything" icon="gauge">
+    Limit requests per user, per IP, per endpoint — or any identifier you choose. No Redis required.
+    
+    ```ts
+    const { success } = await limiter.limit(userId);
+    if (!success) return new Response("Too many requests", { status: 429 });
+    ```
+  </Accordion>
+  
+  <Accordion title="Usage-based billing" icon="receipt">
+    Track API usage per customer with credit limits and automatic refills. Perfect for tiered pricing.
+    
+    ```ts
+    // Create a key with 1000 credits/month that refills automatically
+    const { meta, data } = await unkey.keys.create({
+      apiId: "api_...",
+      credits: {
+        remaining: 1000,
+        refill: { amount: 1000, refillDay: 1 }
+      }
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Multi-tenant rate limits" icon="building">
+    Use Identities to group keys under users or organizations, sharing rate limits across all their keys.
+    
+    ```ts
+    // All keys for this identity share the same rate limit pool
+    const { meta, data } = await unkey.keys.create({
+      apiId: "api_...",
+      externalId: "org_acme",
+      ratelimits: [{ name: "requests", limit: 10000, duration: 3600000 }]
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Get started
+
+<CardGroup cols={3}>
+  <Card
+    title="Quickstart"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Create your first API and verify a key in under 5 minutes.
+  </Card>
+  <Card
+    title="Key Features"
+    icon="sparkles"
+    href="/glossary"
+  >
+    Learn about API keys, rate limits, identities, and more.
+  </Card>
+  <Card
+    title="API Reference"
+    icon="code"
+    href="/api/introduction"
+  >
+    Complete API documentation with examples.
+  </Card>
+</CardGroup>
+
+## Choose your path
+
+<CardGroup cols={2}>
+  <Card title="I need API key authentication" icon="key" href="/features/api-keys">
+    Issue keys to users, verify on requests, track usage per key.
+  </Card>
+  <Card title="I need rate limiting" icon="gauge-high" href="/features/rate-limiting">
+    Protect endpoints from abuse without managing Redis infrastructure.
+  </Card>
+  <Card title="I need both" icon="bolt" href="/quickstart">
+    Start with API keys — rate limiting can be added per-key or standalone.
+  </Card>
+  <Card title="I'm migrating from another solution" icon="arrows-rotate" href="/quickstart">
+    Get started quickly with our quickstart guide.
+  </Card>
+</CardGroup>
+
+## Join the community
+
+Questions? Ideas? Just want to hang out with other API builders?
+
+<CardGroup cols={3}>
+  <Card title="Discord" icon="discord" href="https://unkey.com/discord">
+    Chat with the team and community
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com/unkeyed/unkey">
+    Star us, report issues, contribute
+  </Card>
+  <Card title="Twitter / X" icon="x-twitter" href="https://x.com/unkeydev">
+    Follow for updates
+  </Card>
+</CardGroup>

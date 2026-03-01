@@ -1,0 +1,591 @@
+---
+title: API Key Management
+description: Create, verify, and manage API keys at scale with granular control over expiration, limits, and permissions
+---
+
+API keys are the foundation of Unkey. They provide a simple, secure way to authenticate requests to your API while giving you fine-grained control over access, usage, and permissions.
+
+## Overview
+
+Unkey handles the complete API key lifecycle — from creation to verification to revocation — so you can focus on building your API instead of managing authentication infrastructure.
+
+<CardGroup cols={2}>
+  <Card title="Create keys" icon="plus">
+    Generate API keys programmatically via API or dashboard with custom configuration
+  </Card>
+  <Card title="Verify instantly" icon="shield-check">
+    Verify keys in ~50ms globally with automatic validation of limits, expiration, and permissions
+  </Card>
+  <Card title="Track usage" icon="chart-line">
+    Monitor verification patterns, track remaining credits, and analyze usage per key
+  </Card>
+  <Card title="Revoke immediately" icon="ban">
+    Disable or delete keys with global propagation in under 60 seconds
+  </Card>
+</CardGroup>
+
+## Key Creation
+
+Create API keys through the dashboard or API with complete control over their configuration.
+
+<Tabs>
+  <Tab title="TypeScript">
+    ```typescript
+    import { Unkey } from "@unkey/api";
+
+    const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY });
+
+    try {
+      const { meta, data } = await unkey.keys.create({
+        apiId: "api_...",
+        name: "Production Key - Acme Corp",
+        externalId: "user_123",  // Your user ID
+        meta: {
+          plan: "pro",
+          company: "Acme Corp",
+          email: "dev@acme.com"
+        },
+        expires: Date.now() + 365 * 24 * 60 * 60 * 1000,  // 1 year
+        remaining: 100000,  // Usage limit
+        refill: {
+          interval: "monthly",
+          amount: 100000
+        },
+        ratelimits: [{
+          name: "requests",
+          limit: 100,
+          duration: 60000  // 100 requests per minute
+        }]
+      });
+
+      console.log(data.key);  // sk_...
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    from unkey import Unkey
+    import time
+
+    unkey = Unkey(root_key="unkey_...")
+
+    result = unkey.keys.create_key(
+        api_id="api_...",
+        name="Production Key - Acme Corp",
+        external_id="user_123",
+        meta={
+            "plan": "pro",
+            "company": "Acme Corp",
+            "email": "dev@acme.com"
+        },
+        expires=int(time.time() * 1000) + (365 * 24 * 60 * 60 * 1000),
+        remaining=100000,
+        refill={
+            "interval": "monthly",
+            "amount": 100000
+        }
+    )
+
+    print(result.key)
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -X POST https://api.unkey.com/v2/keys.createKey \
+      -H "Authorization: Bearer $UNKEY_ROOT_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "apiId": "api_...",
+        "name": "Production Key - Acme Corp",
+        "externalId": "user_123",
+        "meta": {
+          "plan": "pro",
+          "company": "Acme Corp"
+        },
+        "expires": 1735689600000,
+        "remaining": 100000,
+        "refill": {
+          "interval": "monthly",
+          "amount": 100000
+        },
+        "ratelimits": [{
+          "name": "requests",
+          "limit": 100,
+          "duration": 60000
+        }]
+      }'
+    ```
+  </Tab>
+</Tabs>
+
+### Key Configuration Options
+
+<AccordionGroup>
+  <Accordion title="Basic Settings" icon="gear">
+    | Field | Type | Description |
+    |-------|------|-------------|
+    | `apiId` | string | The API this key belongs to (required) |
+    | `name` | string | Human-readable name for the key |
+    | `externalId` | string | Your internal user/customer ID for linking |
+    | `meta` | object | Custom JSON metadata (plan tier, feature flags, etc.) |
+  </Accordion>
+  
+  <Accordion title="Expiration" icon="clock">
+    Set an expiration timestamp (Unix milliseconds) to automatically invalidate keys after a certain time.
+
+    ```typescript
+    expires: Date.now() + 7 * 24 * 60 * 60 * 1000  // 7 days
+    ```
+
+    Keys return `code: "EXPIRED"` after expiration. Perfect for trials, temporary access, or forced rotation.
+  </Accordion>
+  
+  <Accordion title="Usage Limits (Credits)" icon="calculator">
+    Limit total requests a key can make. Each verification decrements the counter.
+
+    ```typescript
+    remaining: 1000  // Key stops working after 1000 uses
+    ```
+
+    When exhausted, verification returns `code: "USAGE_EXCEEDED"`.
+  </Accordion>
+  
+  <Accordion title="Auto-Refill" icon="arrows-rotate">
+    Automatically restore credits on a schedule:
+
+    ```typescript
+    refill: {
+      interval: "daily",    // or "monthly"
+      amount: 1000,         // Credits to restore
+      refillDay: 1          // For monthly: day of month (1-31)
+    }
+    ```
+
+    Perfect for subscription models: "50,000 requests/month".
+  </Accordion>
+  
+  <Accordion title="Rate Limiting" icon="gauge-high">
+    Limit request frequency per key:
+
+    ```typescript
+    ratelimits: [
+      {
+        name: "requests",
+        limit: 100,
+        duration: 60000  // 100 per minute
+      },
+      {
+        name: "heavy",
+        limit: 10,
+        duration: 60000  // 10 heavy operations per minute
+      }
+    ]
+    ```
+
+    Multiple limits can be applied to different operation types.
+  </Accordion>
+  
+  <Accordion title="Permissions & Roles" icon="user-shield">
+    Attach permissions for fine-grained access control:
+
+    ```typescript
+    roles: ["editor"],
+    permissions: ["documents.read", "documents.write"]
+    ```
+
+    Checked during verification to authorize specific actions.
+  </Accordion>
+</AccordionGroup>
+
+## Key Verification
+
+Verify keys on every request to authenticate users and enforce limits.
+
+<Tabs>
+  <Tab title="TypeScript">
+    ```typescript
+    import { Unkey } from "@unkey/api";
+
+    const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY });
+
+    export async function handler(req: Request) {
+      const key = req.headers.get("Authorization")?.replace("Bearer ", "");
+
+      if (!key) {
+        return new Response("Missing API key", { status: 401 });
+      }
+
+      try {
+        const { meta, data } = await unkey.keys.verifyKey({ key });
+
+        if (!data.valid) {
+          return new Response(
+            `Unauthorized: ${data.code}`,
+            { status: 401 }
+          );
+        }
+
+        // Access key metadata
+        console.log(data.keyId);      // key_...
+        console.log(data.meta);        // Custom metadata
+        console.log(data.credits);     // Remaining credits
+        console.log(data.identity);    // Identity info if linked
+
+        // Continue with API logic...
+        return new Response("Success!");
+      } catch (err) {
+        console.error(err);
+        return new Response("Service unavailable", { status: 503 });
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    from unkey import Unkey
+
+    unkey = Unkey(root_key="unkey_...")
+
+    def handler(request):
+        auth = request.headers.get("Authorization", "")
+        key = auth.replace("Bearer ", "")
+        
+        if not key:
+            return Response("Missing API key", status=401)
+        
+        result = unkey.keys.verify_key(key=key)
+        
+        if not result.valid:
+            return Response(f"Unauthorized: {result.code}", status=401)
+        
+        # Access key data
+        print(result.key_id)
+        print(result.meta)
+        print(result.credits)
+        
+        return Response("Success!")
+    ```
+  </Tab>
+  <Tab title="Go">
+    ```go
+    package main
+
+    import (
+        "context"
+        "net/http"
+        "strings"
+        unkey "github.com/unkeyed/sdks/api/go/v2"
+        "github.com/unkeyed/sdks/api/go/v2/components"
+    )
+
+    func handler(w http.ResponseWriter, r *http.Request) {
+        auth := r.Header.Get("Authorization")
+        key := strings.TrimPrefix(strings.TrimSpace(auth), "Bearer ")
+
+        client := unkey.New(unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")))
+
+        res, err := client.Keys.VerifyKey(context.Background(),
+            components.V2KeysVerifyKeyRequestBody{
+                Key: key,
+            })
+
+        if err != nil || !res.Valid {
+            http.Error(w, "Unauthorized", http.StatusUnauthorized)
+            return
+        }
+
+        w.Write([]byte("Success!"))
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Verification Response
+
+When you verify a key, Unkey returns comprehensive information:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `valid` | boolean | Whether the key passed all checks |
+| `code` | string | Status code: `VALID`, `NOT_FOUND`, `EXPIRED`, `DISABLED`, `RATE_LIMITED`, `USAGE_EXCEEDED`, `INSUFFICIENT_PERMISSIONS` |
+| `keyId` | string | The key's unique identifier |
+| `name` | string | Human-readable name of the key |
+| `meta` | object | Custom metadata attached to the key |
+| `expires` | number | Unix timestamp (ms) when the key expires |
+| `credits` | number | Remaining uses (if usage limits set) |
+| `enabled` | boolean | Whether the key is enabled |
+| `roles` | string[] | Roles attached to the key |
+| `permissions` | string[] | Permissions attached to the key |
+| `identity` | object | Identity info if `externalId` was set |
+| `ratelimits` | object[] | Rate limit states for each configured limit |
+
+<Note>
+The `credits` field shows remaining credits **after** this verification. A value of 999 means the key can be used 999 more times.
+</Note>
+
+### Verification Status Codes
+
+<Tabs>
+  <Tab title="Success">
+    ```json
+    {
+      "valid": true,
+      "code": "VALID",
+      "keyId": "key_...",
+      "credits": 9999
+    }
+    ```
+  </Tab>
+  <Tab title="Not Found">
+    ```json
+    {
+      "valid": false,
+      "code": "NOT_FOUND"
+    }
+    ```
+    Key doesn't exist or was deleted.
+  </Tab>
+  <Tab title="Expired">
+    ```json
+    {
+      "valid": false,
+      "code": "EXPIRED",
+      "keyId": "key_..."
+    }
+    ```
+    Key passed its expiration timestamp.
+  </Tab>
+  <Tab title="Disabled">
+    ```json
+    {
+      "valid": false,
+      "code": "DISABLED",
+      "keyId": "key_..."
+    }
+    ```
+    Key was manually disabled via API or dashboard.
+  </Tab>
+  <Tab title="Rate Limited">
+    ```json
+    {
+      "valid": false,
+      "code": "RATE_LIMITED",
+      "keyId": "key_..."
+    }
+    ```
+    Key exceeded its rate limit. Try again after the window resets.
+  </Tab>
+  <Tab title="Usage Exceeded">
+    ```json
+    {
+      "valid": false,
+      "code": "USAGE_EXCEEDED",
+      "keyId": "key_...",
+      "credits": 0
+    }
+    ```
+    Key ran out of credits. Add more to re-enable.
+  </Tab>
+</Tabs>
+
+## Metadata Management
+
+Store arbitrary JSON data with each key for context and configuration.
+
+### Common Use Cases
+
+<CardGroup cols={2}>
+  <Card title="User context" icon="user">
+    ```json
+    {
+      "userId": "user_123",
+      "email": "dev@acme.com",
+      "company": "Acme Corp"
+    }
+    ```
+  </Card>
+  <Card title="Plan information" icon="tag">
+    ```json
+    {
+      "plan": "enterprise",
+      "tier": "unlimited",
+      "billingId": "cus_..."
+    }
+    ```
+  </Card>
+  <Card title="Feature flags" icon="flag">
+    ```json
+    {
+      "features": [
+        "beta-access",
+        "advanced-analytics"
+      ]
+    }
+    ```
+  </Card>
+  <Card title="Resource scoping" icon="folder-tree">
+    ```json
+    {
+      "projectId": "proj_456",
+      "teamId": "team_789",
+      "environment": "production"
+    }
+    ```
+  </Card>
+</CardGroup>
+
+### Update Metadata
+
+```typescript
+try {
+  const { meta, data } = await unkey.keys.update({
+    keyId: "key_...",
+    meta: {
+      plan: "enterprise",  // Upgraded from pro
+      features: ["analytics", "sso", "audit-logs"]
+    }
+  });
+} catch (err) {
+  console.error(err);
+}
+```
+
+## Key Revocation
+
+Revoke access immediately when keys are compromised or users churn.
+
+<Tabs>
+  <Tab title="Delete (Permanent)">
+    ```typescript
+    // Permanently remove the key
+    try {
+      const { meta, data } = await unkey.keys.delete({
+        keyId: "key_...",
+      });
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+    Use when the key should never work again. Cannot be undone.
+  </Tab>
+  <Tab title="Disable (Temporary)">
+    ```typescript
+    // Temporarily suspend the key
+    try {
+      const { meta, data } = await unkey.keys.update({
+        keyId: "key_...",
+        enabled: false,
+      });
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+    Use for temporary suspension. Can be re-enabled later.
+  </Tab>
+</Tabs>
+
+<Warning>
+Deletion is permanent and cannot be reversed. The key cannot be recovered. If you might need to restore access, use disable instead.
+</Warning>
+
+### Propagation Time
+
+- **Delete**: Up to 60 seconds for global invalidation
+- **Disable**: Up to 60 seconds for global propagation
+- **Re-enable**: Immediate
+
+## Advanced Features
+
+<CardGroup cols={2}>
+  <Card title="Custom cost per request" icon="calculator">
+    Charge different amounts per operation type:
+    
+    ```typescript
+    // Complex query costs 10 credits
+    await unkey.keys.verifyKey({
+      key: "sk_...",
+      cost: 10
+    });
+    ```
+  </Card>
+  <Card title="Permission checking" icon="shield-check">
+    Verify permissions during authentication:
+    
+    ```typescript
+    await unkey.keys.verifyKey({
+      key: "sk_...",
+      permissions: "documents.write"
+    });
+    ```
+  </Card>
+  <Card title="Key rerolling" icon="arrows-rotate">
+    Generate a new key while preserving configuration:
+    
+    ```typescript
+    await unkey.keys.reroll({
+      keyId: "key_..."
+    });
+    ```
+  </Card>
+  <Card title="Update credits" icon="coins">
+    Manually adjust credit balance:
+    
+    ```typescript
+    await unkey.keys.updateCredits({
+      keyId: "key_...",
+      operation: "increment",
+      value: 5000
+    });
+    ```
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always use HTTPS" icon="lock">
+    API keys should only be transmitted over secure connections. Never send keys in URLs or query parameters.
+  </Accordion>
+  
+  <Accordion title="Store keys securely" icon="vault">
+    Never commit keys to version control. Use environment variables or secret management services.
+  </Accordion>
+  
+  <Accordion title="Implement key rotation" icon="rotate">
+    Regularly rotate keys for security. Use the reroll feature to generate new keys while maintaining configuration.
+  </Accordion>
+  
+  <Accordion title="Use granular permissions" icon="shield-halved">
+    Give keys only the permissions they need. Create separate keys for different services or operations.
+  </Accordion>
+  
+  <Accordion title="Monitor verification patterns" icon="chart-line">
+    Watch for unusual activity — sudden spikes, failed verifications, or geographic anomalies.
+  </Accordion>
+  
+  <Accordion title="Handle verification failures gracefully" icon="triangle-exclamation">
+    Always check the `code` field to provide helpful error messages to users:
+    - `EXPIRED`: "Your API key has expired. Please generate a new one."
+    - `USAGE_EXCEEDED`: "You've reached your request limit. Upgrade for more."
+    - `RATE_LIMITED`: "Too many requests. Please slow down."
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Rate Limiting" icon="gauge-high" href="/features/rate-limiting">
+    Protect your API from abuse with flexible rate limiting
+  </Card>
+  <Card title="Identities" icon="fingerprint" href="/features/identities">
+    Group multiple keys under users or organizations
+  </Card>
+  <Card title="Analytics" icon="chart-line" href="/features/analytics">
+    Track usage patterns and verification trends
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/v2/overview">
+    Complete API documentation for all endpoints
+  </Card>
+</CardGroup>

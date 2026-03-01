@@ -1,0 +1,68 @@
+---
+title: 'Get API'
+description: 'Retrieve basic information about an API namespace including its ID and name'
+---
+
+## POST /v2/apis.getApi
+
+Retrieve basic information about an API namespace including its ID and name. Use this to verify an API exists before performing operations, get the human-readable name when you only have the API ID, or confirm access to a specific namespace.
+
+### Required Permissions
+
+Your root key must have one of the following permissions:
+- `api.*.read_api` (to read any API)
+- `api.<api_id>.read_api` (to read a specific API)
+
+### Request
+
+<ParamField body="apiId" type="string" required>
+  Specifies which API to retrieve by its unique identifier. Must be a valid API ID that begins with 'api_' and exists within your workspace.
+  
+  Example: `api_1234abcd`
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="string" required>
+  The unique identifier of this API within Unkey's system. Used in all operations related to this API including key creation, verification, and management. Always begins with 'api_' followed by alphanumeric characters and underscores. This identifier is permanent and never changes after API creation.
+  
+  Example: `api_1234567890abcdef`
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  The internal name of this API as specified during creation. Used for organization and identification within your workspace. Helps distinguish between different environments, services, or access tiers.
+  
+  Example: `payment-service-production`
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/apis.getApi \
+  -H "Authorization: Bearer <your-root-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiId": "api_1234abcd"
+  }'
+```
+
+```json Response
+{
+  "meta": {
+    "requestId": "req_1234abcd"
+  },
+  "data": {
+    "id": "api_1234abcd",
+    "name": "Payment Service Production"
+  }
+}
+```
+
+### Error Codes
+
+- `400` - Bad request (invalid API ID format)
+- `401` - Unauthorized (missing or invalid root key)
+- `403` - Forbidden (insufficient permissions)
+- `404` - Not found (API does not exist)
+- `429` - Too many requests (rate limit exceeded)
+- `500` - Internal server error

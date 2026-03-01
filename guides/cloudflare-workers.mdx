@@ -1,0 +1,475 @@
+---
+title: Cloudflare Workers Integration Guide
+description: Complete guide to integrating Unkey API authentication in Cloudflare Workers with edge authentication
+---
+
+## Overview
+
+This guide covers everything you need to protect your Cloudflare Workers with Unkey's globally distributed verification. Perfect for edge APIs, serverless functions, and globally distributed applications.
+
+**What you'll learn:**
+- Quick setup with `@unkey/api`
+- Using Hono for better routing
+- Reusable middleware patterns
+- Permission-based access control
+- Durable Objects integration
+- Deployment best practices
+
+## Prerequisites
+
+- [Unkey account](https://app.unkey.com/auth/sign-up) (free)
+- [API created](https://app.unkey.com/apis) in your Unkey dashboard
+- [Cloudflare account](https://dash.cloudflare.com/sign-up/workers)
+- Node.js 18+
+
+## Quick Start
+
+<Steps>
+
+<Step title="Create a Cloudflare Worker">
+
+```bash
+npm create cloudflare@latest my-api
+cd my-api
+```
+
+</Step>
+
+<Step title="Install Unkey SDK">
+
+```bash
+npm install @unkey/api
+```
+
+</Step>
+
+<Step title="Configure secrets">
+
+Add your root key as a secret:
+
+```bash
+npx wrangler secret put UNKEY_ROOT_KEY
+```
+
+Enter your root key when prompted.
+
+</Step>
+
+<Step title="Create a basic worker">
+
+```typescript src/index.ts
+import { Unkey } from "@unkey/api";
+
+export interface Env {
+  UNKEY_ROOT_KEY: string;
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    // 1. Extract API key
+    const authHeader = request.headers.get("Authorization");
+
+    if (!authHeader?.startsWith("Bearer ")) {
+      return Response.json(
+        { error: "Missing API key" },
+        { status: 401 }
+      );
+    }
+
+    const unkey = new Unkey({ rootKey: env.UNKEY_ROOT_KEY });
+    const apiKey = authHeader.slice(7);
+
+    try {
+      // 2. Verify with Unkey
+      const { meta, data, error } = await unkey.keys.verifyKey({
+        key: apiKey,
+      });
+
+      // 3. Handle errors
+      if (error) {
+        console.error("Unkey error:", error);
+        return Response.json(
+          { error: "Authentication service unavailable" },
+          { status: 503 }
+        );
+      }
+
+      // 4. Check validity
+      if (!data.valid) {
+        return Response.json(
+          { error: data.code },
+          { status: data.code === "RATE_LIMITED" ? 429 : 401 }
+        );
+      }
+
+      // 5. Request is authenticated
+      return Response.json({
+        message: "Access granted",
+        user: data.identity?.externalId,
+        remaining: data.credits,
+      });
+    } catch (error) {
+      console.error("Unkey error:", error);
+      return Response.json(
+        { error: "Authentication service unavailable" },
+        { status: 503 }
+      );
+    }
+  },
+};
+```
+
+</Step>
+
+<Step title="Deploy">
+
+```bash
+npx wrangler deploy
+```
+
+</Step>
+
+<Step title="Test it">
+
+Create a test key in your [Unkey dashboard](https://app.unkey.com), then:
+
+```bash
+curl https://my-api.your-subdomain.workers.dev \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+</Step>
+
+</Steps>
+
+## Using Hono for Better Routing
+
+For a cleaner routing experience, use [Hono](https://hono.dev/):
+
+```bash
+npm install hono @unkey/hono
+```
+
+```typescript src/index.ts
+import { Hono } from "hono";
+import { unkey } from "@unkey/hono";
+
+type Bindings = {
+  UNKEY_ROOT_KEY: string;
+};
+
+const app = new Hono<{ Bindings: Bindings }>();
+
+// Public routes
+app.get("/health", (c) => c.json({ status: "ok" }));
+
+// Protected routes with Unkey middleware
+app.use("/api/*", async (c, next) => {
+  const handler = unkey({
+    rootKey: c.env.UNKEY_ROOT_KEY,
+    getKey: (c) => c.req.header("Authorization")?.replace("Bearer ", ""),
+    onError: (c, error) => {
+      console.error("Unkey error:", error);
+      return c.json({ error: "Service unavailable" }, 503);
+    },
+    handleInvalidKey: (c, result) => {
+      return c.json({ error: result.code }, 401);
+    },
+  });
+  
+  return handler(c, next);
+});
+
+app.get("/api/data", (c) => {
+  const auth = c.get("unkey");
+  
+  return c.json({
+    message: "Access granted",
+    user: auth.identity?.externalId,
+    remaining: auth.credits,
+  });
+});
+
+app.get("/api/users", (c) => {
+  return c.json({ users: [] });
+});
+
+export default app;
+```
+
+## Reusable Middleware
+
+Create a clean middleware pattern:
+
+```typescript src/middleware/auth.ts
+import { Unkey } from "@unkey/api";
+import { UnkeyError } from "@unkey/api/models/errors";
+import { V2KeysVerifyKeyResponseData } from "@unkey/api/models/components";
+import { Context, Next } from "hono";
+
+declare module "hono" {
+  interface ContextVariableMap {
+    auth: V2KeysVerifyKeyResponseData;
+  }
+}
+
+interface AuthOptions {
+  getKey?: (c: Context) => string | null;
+  permissions?: string;
+}
+
+type Bindings = {
+  UNKEY_ROOT_KEY: string;
+};
+
+export function authMiddleware(options: AuthOptions = {}) {
+  return async (c: Context, next: Next) => {
+    const getKey = options.getKey ?? ((c) =>
+      c.req.header("Authorization")?.replace("Bearer ", "") ?? null
+    );
+
+    const apiKey = getKey(c);
+
+    if (!apiKey) {
+      return c.json({ error: "Missing API key" }, 401);
+    }
+
+    try {
+      const unkey = new Unkey({ rootKey: c.env.UNKEY_ROOT_KEY });
+      const { data, error } = await unkey.keys.verifyKey({
+        key: apiKey,
+        permissions: options.permissions,
+      });
+
+      if (error) {
+        console.error("Unkey error:", error);
+        return c.json({ error: "Service unavailable" }, 503);
+      }
+
+      if (!data.valid) {
+        if (data.code === "INSUFFICIENT_PERMISSIONS") {
+          return c.json({ error: "Forbidden" }, 403);
+        }
+        return c.json({ error: data.code }, 401);
+      }
+
+      c.set("auth", data);
+      await next();
+    } catch (err) {
+      return c.json({ error: "Service unavailable" }, 503);
+    }
+  };
+}
+```
+
+Use it:
+
+```typescript src/index.ts
+import { Hono } from "hono";
+import { authMiddleware } from "./middleware/auth";
+
+const app = new Hono();
+
+// Basic auth
+app.use("/api/*", (c, next) => 
+  authMiddleware()(c, next)
+);
+
+// Permission-based auth for admin routes
+app.use("/admin/*", (c, next) => 
+  authMiddleware({ 
+    permissions: "admin",
+  })(c, next)
+);
+
+app.get("/api/data", (c) => {
+  const auth = c.get("auth");
+  return c.json({ user: auth.identity?.externalId });
+});
+
+app.delete("/admin/users/:id", (c) => {
+  // Only accessible with admin permission
+  return c.json({ deleted: c.req.param("id") });
+});
+
+export default app;
+```
+
+## Rate Limit Headers
+
+Add standard rate limit headers to responses:
+
+```typescript src/middleware/auth.ts
+import { Unkey } from "@unkey/api";
+
+export function authMiddleware(options: AuthOptions = {}) {
+  return async (c: Context, next: Next) => {
+    const apiKey = c.req.header("Authorization")?.replace("Bearer ", "");
+    
+    if (!apiKey) {
+      return c.json({ error: "Missing API key" }, 401);
+    }
+
+    try {
+      const unkey = new Unkey({ rootKey: c.env.UNKEY_ROOT_KEY });
+      const { meta, data, error } = await unkey.keys.verifyKey({
+        key: apiKey,
+      });
+
+      // Set rate limit headers
+      if (data.ratelimits?.[0]) {
+        const rl = data.ratelimits[0];
+        c.header("X-RateLimit-Limit", rl.limit.toString());
+        c.header("X-RateLimit-Remaining", rl.remaining.toString());
+        c.header("X-RateLimit-Reset", rl.reset.toString());
+      }
+
+      if (data.credits !== undefined) {
+        c.header("X-Credits-Remaining", data.credits.toString());
+      }
+
+      if (!data.valid) {
+        const status = data.code === "RATE_LIMITED" ? 429 : 401;
+        return c.json({ error: data.code }, status);
+      }
+
+      c.set("auth", data);
+      await next();
+    } catch (err) {
+      return c.json({ error: "Service unavailable" }, 503);
+    }
+  };
+}
+```
+
+## Durable Objects Integration
+
+For stateful applications with Durable Objects:
+
+```typescript src/index.ts
+import { Unkey } from "@unkey/api";
+import { DurableObject } from "cloudflare:workers";
+
+export interface Env {
+  UNKEY_ROOT_KEY: string;
+  COUNTER: DurableObjectNamespace;
+}
+
+export class Counter extends DurableObject {
+  async fetch(request: Request) {
+    let count = (await this.ctx.storage.get("count")) as number || 0;
+    count++;
+    await this.ctx.storage.put("count", count);
+    return Response.json({ count });
+  }
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const unkey = new Unkey({ rootKey: env.UNKEY_ROOT_KEY });
+
+    // Verify API key first
+    const apiKey = request.headers.get("Authorization")?.slice(7);
+
+    if (!apiKey) {
+      return Response.json({ error: "Missing API key" }, { status: 401 });
+    }
+
+    try {
+      const { meta, data, error } = await unkey.keys.verifyKey({
+        key: apiKey,
+      });
+
+      if (error || !data.valid) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+
+      // Use external ID as Durable Object ID for per-user state
+      const id = env.COUNTER.idFromName(data.identity?.externalId ?? "anonymous");
+      const counter = env.COUNTER.get(id);
+
+      return counter.fetch(request);
+    } catch (error) {
+      return Response.json({ error: "Service unavailable" }, { status: 503 });
+    }
+  },
+};
+```
+
+Update `wrangler.toml`:
+
+```toml wrangler.toml
+name = "my-api"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[[durable_objects.bindings]]
+name = "COUNTER"
+class_name = "Counter"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["Counter"]
+```
+
+## Environment Configuration
+
+```toml wrangler.toml
+name = "my-api"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+# Store UNKEY_ROOT_KEY as a secret, not in config
+# Run: npx wrangler secret put UNKEY_ROOT_KEY
+```
+
+## Local Development
+
+For local testing:
+
+```bash
+# Start local dev server
+npx wrangler dev
+
+# Test locally
+curl http://localhost:8787/api/data \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Add rate limiting" icon="gauge-high" href="/apis/features/ratelimiting/overview">
+    Limit requests per key
+  </Card>
+  <Card title="Set usage limits" icon="calculator" href="/apis/features/remaining">
+    Cap total requests per key
+  </Card>
+  <Card title="Add permissions" icon="user-shield" href="/apis/features/authorization/introduction">
+    Fine-grained access control
+  </Card>
+  <Card title="TypeScript SDK" icon="book" href="/libraries/ts/api">
+    Full SDK documentation
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Getting 401 even with a valid key?">
+    - Ensure the key hasn't expired or been revoked
+    - Verify the `Authorization` header format: `Bearer YOUR_KEY`
+    - Check that your root key is set correctly: `wrangler secret list`
+  </Accordion>
+  
+  <Accordion title="Secrets not working locally?">
+    - Create a `.dev.vars` file in your project root
+    - Add: `UNKEY_ROOT_KEY=unkey_...`
+    - Never commit `.dev.vars` to version control
+  </Accordion>
+  
+  <Accordion title="Rate limiting not working?">
+    - Ensure rate limits are configured on your API keys in the dashboard
+    - Check that `data.ratelimits` is not empty in the verification response
+  </Accordion>
+</AccordionGroup>

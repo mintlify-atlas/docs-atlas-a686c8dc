@@ -1,0 +1,509 @@
+---
+title: Analytics & Usage Tracking
+description: Monitor API key usage, track verification patterns, and gain insights into your API consumers
+---
+
+Unkey automatically captures detailed analytics for every API key verification, giving you real-time visibility into how your API is being used, who's using it, and when anomalies occur.
+
+## What Gets Tracked
+
+Every key verification generates analytics data:
+
+<CardGroup cols={2}>
+  <Card title="Verification events" icon="shield-check">
+    Successful and failed verification attempts with timestamps and outcomes
+  </Card>
+  <Card title="Usage patterns" icon="chart-line">
+    Request frequency, peak times, and traffic trends per key or identity
+  </Card>
+  <Card title="Rate limit violations" icon="gauge-high">
+    When keys hit rate limits and which limits are being exceeded
+  </Card>
+  <Card title="Credit consumption" icon="coins">
+    Usage limit tracking — how many credits remain and when they're depleted
+  </Card>
+  <Card title="Geographic distribution" icon="globe">
+    Where requests are coming from globally (by region)
+  </Card>
+  <Card title="Error patterns" icon="triangle-exclamation">
+    Failed verifications: expired keys, disabled keys, insufficient permissions
+  </Card>
+</CardGroup>
+
+## Dashboard Analytics
+
+Access analytics through the Unkey dashboard:
+
+<Steps>
+  <Step title="Navigate to Analytics">
+    Sign into [app.unkey.com](https://app.unkey.com) and click **Analytics** in the sidebar
+  </Step>
+  <Step title="Select your API">
+    Choose which API to analyze from the dropdown
+  </Step>
+  <Step title="Choose time range">
+    Filter by last 24 hours, 7 days, 30 days, or custom date range
+  </Step>
+</Steps>
+
+### Available Views
+
+<Tabs>
+  <Tab title="Overview">
+    **High-level metrics:**
+    - Total verifications (successful + failed)
+    - Success rate percentage
+    - Active keys count
+    - Top consumers by volume
+    - Verification trends over time
+
+    Use this to monitor overall API health and identify growth patterns.
+  </Tab>
+  <Tab title="Per-Key Analytics">
+    **Drill down into individual keys:**
+    - Verification count
+    - Success vs. failure breakdown
+    - Rate limit hits
+    - Credits remaining
+    - Last used timestamp
+    - Geographic distribution
+
+    Click any key in the Keys list to see detailed usage.
+  </Tab>
+  <Tab title="Per-Identity Analytics">
+    **Aggregate usage by identity:**
+    - Total verifications across all keys
+    - Combined rate limit utilization
+    - Credit consumption across keys
+    - Which keys are most active
+
+    Perfect for understanding customer-level usage.
+  </Tab>
+  <Tab title="Errors & Failures">
+    **Track verification failures:**
+    - `EXPIRED`: Keys past their expiration time
+    - `DISABLED`: Manually disabled keys
+    - `RATE_LIMITED`: Keys hitting rate limits
+    - `USAGE_EXCEEDED`: Keys with depleted credits
+    - `INSUFFICIENT_PERMISSIONS`: Authorization failures
+    - `NOT_FOUND`: Invalid or deleted keys
+
+    Use this to identify security issues or user problems.
+  </Tab>
+</Tabs>
+
+## Verification Logs
+
+View detailed logs of every verification attempt:
+
+<Tabs>
+  <Tab title="Access Logs">
+    1. Go to **Keys** in the dashboard
+    2. Click on any key
+    3. Navigate to the **Verifications** tab
+
+    Each log entry shows:
+    - Timestamp (with millisecond precision)
+    - Outcome (`VALID`, `RATE_LIMITED`, etc.)
+    - Request metadata (if provided during verification)
+    - Identity info (if key is linked)
+    - Rate limit state
+    - Credits consumed
+  </Tab>
+  <Tab title="Log Retention">
+    | Plan | Retention Period |
+    |------|------------------|
+    | Free | 7 days |
+    | Pro | 90 days |
+    | Enterprise | Custom (up to unlimited) |
+
+    Need longer retention? [Contact us](mailto:support@unkey.com) about enterprise options.
+  </Tab>
+  <Tab title="Filtering Logs">
+    Filter verification logs by:
+    - **Outcome**: Show only failures, successes, or specific codes
+    - **Time range**: Focus on specific time periods
+    - **Identity**: See verifications for a specific user
+    - **Key**: Drill into a single key's activity
+  </Tab>
+</Tabs>
+
+## Programmatic Analytics
+
+Query analytics data programmatically via the Unkey API.
+
+<Note>
+The Analytics API is available on Pro and Enterprise plans. It requires a root key with `analytics.query` permission.
+</Note>
+
+<Tabs>
+  <Tab title="Query Verifications">
+    ```typescript
+    // Get verification count for last 30 days
+    const response = await fetch("https://api.unkey.com/v1/analytics.getVerifications", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.UNKEY_ROOT_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        apiId: "api_...",
+        start: Date.now() - 30 * 24 * 60 * 60 * 1000,
+        end: Date.now()
+      })
+    });
+
+    const data = await response.json();
+    console.log(data.verifications);  // Total count
+    ```
+  </Tab>
+  <Tab title="Query by Key">
+    ```typescript
+    // Get usage for a specific key
+    const response = await fetch("https://api.unkey.com/v1/analytics.getVerifications", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.UNKEY_ROOT_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        apiId: "api_...",
+        keyId: "key_...",
+        start: Date.now() - 7 * 24 * 60 * 60 * 1000,
+        end: Date.now()
+      })
+    });
+
+    const data = await response.json();
+    ```
+  </Tab>
+  <Tab title="Time-Series Data">
+    ```typescript
+    // Get hourly breakdown for graphing
+    const response = await fetch("https://api.unkey.com/v1/analytics.getVerifications", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.UNKEY_ROOT_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        apiId: "api_...",
+        start: Date.now() - 24 * 60 * 60 * 1000,
+        end: Date.now(),
+        granularity: "hour"  // Returns hourly buckets
+      })
+    });
+
+    const data = await response.json();
+    // data.timeseries = [{ timestamp, count }, ...]
+    ```
+  </Tab>
+</Tabs>
+
+## Common Analytics Queries
+
+<AccordionGroup>
+  <Accordion title="Identify top consumers" icon="ranking-star">
+    **In the dashboard:**
+    1. Go to **Analytics** → **Overview**
+    2. Check the **Top Keys** widget
+    3. Sort by verification count
+
+    **Via API:**
+    Query all keys and sum their verification counts:
+    ```typescript
+    try {
+      const { meta, data } = await unkey.keys.list({ apiId: "api_..." });
+      
+      // Keys are returned with usage stats
+      const sorted = data.keys.sort((a, b) => 
+        b.verifications - a.verifications
+      );
+      
+      console.log("Top 10 consumers:", sorted.slice(0, 10));
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Monitor rate limit violations" icon="gauge-high">
+    **Track which keys are hitting limits:**
+    
+    1. Go to **Analytics** → **Errors**
+    2. Filter by code: `RATE_LIMITED`
+    3. Identify patterns:
+       - Same key repeatedly hitting limits → User needs upgrade
+       - Sudden spike in violations → Possible abuse or bug
+       - Specific time of day → Workload scheduling issue
+
+    **Set up alerts:**
+    Use the Audit Log API to build custom alerting:
+    ```typescript
+    // Poll for rate limit events
+    const logs = await fetch("https://api.unkey.com/v1/auditlog.list", {
+      headers: { "Authorization": `Bearer ${rootKey}` }
+    });
+    
+    const rateLimitEvents = logs.data.filter(
+      e => e.event === "key.verification_failed" && 
+           e.meta?.code === "RATE_LIMITED"
+    );
+    
+    if (rateLimitEvents.length > threshold) {
+      // Send alert
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Track credit consumption" icon="coins">
+    **Monitor which keys are running out of credits:**
+    
+    ```typescript
+    try {
+      const { meta, data } = await unkey.keys.list({ apiId: "api_..." });
+      
+      const lowCredit = data.keys.filter(key => 
+        key.remaining !== null && key.remaining < 100
+      );
+      
+      // Alert these users to add more credits
+      for (const key of lowCredit) {
+        console.log(`Key ${key.name}: ${key.remaining} credits left`);
+        // Send email notification
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Detect unusual patterns" icon="magnifying-glass">
+    **Identify anomalies that might indicate compromise:**
+    
+    - **Sudden spike in usage**: Key making 10x normal requests
+    - **New geographic locations**: Key suddenly used from different continent
+    - **Off-hours activity**: Key active at unusual times
+    - **High failure rate**: Many `INSUFFICIENT_PERMISSIONS` errors (possible attack)
+
+    Build custom monitoring:
+    ```typescript
+    // Compare today's usage to 7-day average
+    const todayVerifications = /* query today */;
+    const avgVerifications = /* query last 7 days */ / 7;
+    
+    if (todayVerifications > avgVerifications * 3) {
+      // Alert: 3x normal usage
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Calculate monthly usage for billing" icon="file-invoice-dollar">
+    **Generate usage-based invoices:**
+    
+    ```typescript
+    try {
+      // Get verifications for billing period
+      const startOfMonth = new Date();
+      startOfMonth.setDate(1);
+      startOfMonth.setHours(0, 0, 0, 0);
+      
+      const { meta, data } = await fetch(
+        "https://api.unkey.com/v1/analytics.getVerifications",
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${rootKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            apiId: "api_...",
+            start: startOfMonth.getTime(),
+            end: Date.now()
+          })
+        }
+      ).then(r => r.json());
+      
+      // Calculate bill
+      const costPerRequest = 0.001;  // $0.001 per request
+      const totalCost = data.verifications * costPerRequest;
+      
+      console.log(`Usage: ${data.verifications} requests`);
+      console.log(`Bill: $${totalCost.toFixed(2)}`);
+    } catch (err) {
+      console.error(err);
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Custom Dashboards
+
+Build custom analytics dashboards for your users:
+
+```typescript
+// Example: User-facing usage dashboard
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY });
+
+export async function getUserUsageStats(userId: string) {
+  try {
+    // Get all keys for this user
+    const { meta, data } = await unkey.keys.list({
+      apiId: "api_...",
+      externalId: userId
+    });
+    
+    // Aggregate usage across keys
+    const totalVerifications = data.keys.reduce(
+      (sum, key) => sum + (key.verifications || 0),
+      0
+    );
+    
+    const totalRemaining = data.keys.reduce(
+      (sum, key) => sum + (key.remaining || 0),
+      0
+    );
+    
+    return {
+      totalKeys: data.keys.length,
+      totalVerifications,
+      totalRemaining,
+      keys: data.keys.map(key => ({
+        name: key.name,
+        verifications: key.verifications,
+        remaining: key.remaining,
+        lastUsed: key.lastUsed
+      }))
+    };
+  } catch (err) {
+    console.error(err);
+    throw err;
+  }
+}
+```
+
+## Alerting & Monitoring
+
+Set up automated alerts for critical events:
+
+<CardGroup cols={2}>
+  <Card title="Credit depletion" icon="triangle-exclamation">
+    Alert users when credits drop below threshold:
+    ```typescript
+    if (key.remaining < 100) {
+      await sendEmail({
+        to: key.meta.email,
+        subject: "Low API credits",
+        body: `You have ${key.remaining} credits left`
+      });
+    }
+    ```
+  </Card>
+  <Card title="Rate limit violations" icon="gauge-high">
+    Notify when users consistently hit limits:
+    ```typescript
+    if (rateLimitedCount > 100) {
+      await sendEmail({
+        subject: "Upgrade for higher limits",
+        body: "You're hitting rate limits. Upgrade?"
+      });
+    }
+    ```
+  </Card>
+  <Card title="Unusual activity" icon="magnifying-glass">
+    Detect potential security issues:
+    ```typescript
+    if (verifications > avgVerifications * 5) {
+      await sendSlackAlert({
+        channel: "#security",
+        message: `Unusual activity on key ${keyId}`
+      });
+    }
+    ```
+  </Card>
+  <Card title="Failed verifications" icon="x">
+    Track authentication failures:
+    ```typescript
+    if (failureRate > 0.5) {
+      await logAlert({
+        level: "warning",
+        message: `High failure rate: ${failureRate * 100}%`
+      });
+    }
+    ```
+  </Card>
+</CardGroup>
+
+## Analytics Best Practices
+
+<AccordionGroup>
+  <Accordion title="Monitor key metrics daily" icon="chart-line">
+    Check these metrics every day:
+    - **Total verifications**: Are they growing?
+    - **Success rate**: Should be >99%
+    - **Top consumers**: Who are your power users?
+    - **Error trends**: Are failures increasing?
+  </Accordion>
+  
+  <Accordion title="Set up automated reports" icon="file-chart-column">
+    Generate weekly/monthly reports:
+    - Email stakeholders with usage summaries
+    - Track growth trends
+    - Identify opportunities for upsells
+    - Spot potential churn (declining usage)
+  </Accordion>
+  
+  <Accordion title="Use metadata for segmentation" icon="tags">
+    Store context in key metadata for better analytics:
+    ```typescript
+    meta: {
+      plan: "pro",
+      industry: "fintech",
+      company: "Acme Corp"
+    }
+    ```
+    Then segment analytics by industry, plan, etc.
+  </Accordion>
+  
+  <Accordion title="Correlate with business metrics" icon="arrow-trend-up">
+    Connect API usage to business outcomes:
+    - Do power users have higher retention?
+    - Does usage predict upsells?
+    - Which features drive the most API calls?
+  </Accordion>
+  
+  <Accordion title="Set usage-based alerts" icon="bell">
+    Automate responses to usage patterns:
+    - Low usage → Re-engagement email
+    - High usage → Upsell offer
+    - Depleted credits → Prompt to add more
+    - Rate limits hit → Upgrade prompt
+  </Accordion>
+</AccordionGroup>
+
+## Compliance & Data Privacy
+
+<Note>
+**Data retention**: Analytics data is retained according to your plan. For GDPR/CCPA compliance, you can request deletion of specific key analytics.
+
+**PII handling**: Unkey does not capture request payloads or response bodies — only metadata. Never store PII in key names or metadata unless encrypted.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Audit Logs" icon="scroll" href="/features/audit-logs">
+    Track who made changes to keys and configuration
+  </Card>
+  <Card title="Rate Limiting" icon="gauge-high" href="/features/rate-limiting">
+    Understand how rate limit analytics work
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/v2/overview">
+    Complete analytics API documentation
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/essentials/webhooks">
+    Receive real-time notifications for key events
+  </Card>
+</CardGroup>

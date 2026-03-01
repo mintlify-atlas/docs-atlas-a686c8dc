@@ -1,0 +1,648 @@
+---
+title: TypeScript/JavaScript SDK
+description: Complete TypeScript/JavaScript SDK documentation with installation, initialization, and usage examples for Node.js, Deno, Bun, and edge runtimes
+---
+
+The official Unkey TypeScript/JavaScript SDK provides two packages for managing API keys and rate limiting in your applications.
+
+## Packages
+
+- **@unkey/api** — Manage keys, APIs, and rate limits (requires root key)
+- **@unkey/ratelimit** — Standalone rate limiting (requires root key)
+
+For framework-specific wrappers, see [@unkey/nextjs](/libraries/ts/nextjs) and [@unkey/hono](/libraries/ts/hono).
+
+---
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install @unkey/api @unkey/ratelimit
+```
+
+```bash pnpm
+pnpm add @unkey/api @unkey/ratelimit
+```
+
+```bash bun
+bun add @unkey/api @unkey/ratelimit
+```
+
+```bash yarn
+yarn add @unkey/api @unkey/ratelimit
+```
+
+</CodeGroup>
+
+<Note>
+Both packages support CommonJS and ES Modules. Compatible with Node.js 18+, Deno 1.25+, Bun 1.0+, Cloudflare Workers, and edge runtimes.
+</Note>
+
+---
+
+## Initialization
+
+### Initialize the API client
+
+```typescript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({
+  rootKey: process.env.UNKEY_ROOT_KEY!,
+});
+```
+
+### Initialize the rate limiter
+
+```typescript
+import { Ratelimit } from "@unkey/ratelimit";
+
+const limiter = new Ratelimit({
+  rootKey: process.env.UNKEY_ROOT_KEY!,
+  namespace: "my-app",
+  limit: 10,
+  duration: "60s",
+});
+```
+
+<Warning>
+Never expose your root key in client-side code. These SDKs are designed for server-side use only.
+</Warning>
+
+---
+
+## Verify API Keys
+
+The most common operation — validate a user's API key:
+
+```typescript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY! });
+
+async function handleRequest(request: Request) {
+  const apiKey = request.headers.get("x-api-key");
+
+  if (!apiKey) {
+    return new Response("Missing API key", { status: 401 });
+  }
+
+  try {
+    const { meta, data } = await unkey.keys.verifyKey({
+      key: apiKey,
+    });
+
+    if (!data.valid) {
+      // Key is invalid, expired, rate limited, etc.
+      return new Response(`Unauthorized: ${data.code}`, { status: 401 });
+    }
+
+    // Key is valid — access granted
+    return handleAuthenticatedRequest(request, data);
+  } catch (err) {
+    console.error(err);
+    return new Response("Service unavailable", { status: 503 });
+  }
+}
+```
+
+### Verification Response
+
+The `data` object contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `valid` | `boolean` | Whether the key passed all checks |
+| `code` | `string` | Status code (`VALID`, `NOT_FOUND`, `RATE_LIMITED`, `INSUFFICIENT_PERMISSIONS`, etc.) |
+| `keyId` | `string` | The key's unique identifier |
+| `name` | `string?` | Human-readable name of the key |
+| `meta` | `object?` | Custom metadata associated with the key |
+| `expires` | `number?` | Unix timestamp (ms) when the key expires |
+| `credits` | `number?` | Remaining uses (if usage limits set) |
+| `enabled` | `boolean` | Whether the key is enabled |
+| `roles` | `string[]?` | Roles attached to the key |
+| `permissions` | `string[]?` | Permissions attached to the key |
+| `identity` | `object?` | Identity info (if `externalId` was set) |
+| `ratelimits` | `object[]?` | Rate limit states |
+
+### Verify with Permission Check
+
+```typescript
+const { data } = await unkey.keys.verifyKey({
+  key: apiKey,
+  permissions: "documents.write",  // Required permission
+});
+
+if (!data.valid && data.code === "INSUFFICIENT_PERMISSIONS") {
+  return new Response("Forbidden", { status: 403 });
+}
+```
+
+---
+
+## Create API Keys
+
+Issue new keys for your users:
+
+```typescript
+const { meta, data } = await unkey.keys.create({
+  apiId: "api_...",
+
+  // Optional but recommended
+  prefix: "sk_live",                    // Visible prefix
+  externalId: "user_123",              // Link to your user
+  name: "Production key",               // Human-readable name
+
+  // Optional limits
+  expires: Date.now() + 30 * 24 * 60 * 60 * 1000,  // 30 days
+  remaining: 1000,                      // Usage limit
+  refill: {
+    amount: 1000,
+    interval: "monthly",                // Auto-refill
+  },
+  ratelimits: [{
+    name: "requests",
+    limit: 100,
+    duration: 60000,                    // 100/minute
+  }],
+
+  // Optional metadata
+  meta: {
+    plan: "pro",
+    createdBy: "admin",
+  },
+});
+
+// Send data.key to your user (only time you'll see it!)
+console.log("New key:", data.key);
+console.log("Key ID:", data.keyId);
+```
+
+<Warning>
+The full API key is only returned once at creation. Unkey stores only a cryptographic hash.
+</Warning>
+
+### Create Key with Permissions
+
+```typescript
+const { data } = await unkey.keys.create({
+  apiId: "api_...",
+  prefix: "sk_live",
+  permissions: ["documents.read", "documents.write"],
+  roles: ["admin"],
+});
+```
+
+---
+
+## Update Keys
+
+Modify an existing key's configuration:
+
+```typescript
+await unkey.keys.update({
+  keyId: "key_...",
+
+  // Update any fields
+  name: "Updated name",
+  meta: { plan: "enterprise" },
+  enabled: true,
+  expires: Date.now() + 90 * 24 * 60 * 60 * 1000,
+  ratelimits: [{
+    name: "requests",
+    limit: 1000,  // Upgraded limit
+    duration: 60000,
+  }],
+});
+```
+
+---
+
+## Delete Keys
+
+Permanently revoke a key:
+
+```typescript
+await unkey.keys.delete({
+  keyId: "key_...",
+});
+```
+
+Or disable temporarily (can re-enable later):
+
+```typescript
+await unkey.keys.update({
+  keyId: "key_...",
+  enabled: false,
+});
+```
+
+---
+
+## Rate Limiting
+
+### Using @unkey/ratelimit
+
+Standalone rate limiting without API keys:
+
+```typescript
+import { Ratelimit } from "@unkey/ratelimit";
+
+const limiter = new Ratelimit({
+  rootKey: process.env.UNKEY_ROOT_KEY!,
+  namespace: "api",
+  limit: 100,
+  duration: "60s",
+});
+
+async function handleRequest(request: Request) {
+  const userId = request.headers.get("x-user-id") ?? "anonymous";
+
+  const { success, remaining, reset } = await limiter.limit(userId);
+
+  if (!success) {
+    return new Response("Rate limit exceeded", {
+      status: 429,
+      headers: {
+        "Retry-After": Math.ceil((reset - Date.now()) / 1000).toString(),
+        "X-RateLimit-Remaining": "0",
+      },
+    });
+  }
+
+  // Process request...
+}
+```
+
+### Cost-Based Rate Limiting
+
+Expensive operations can consume more of the limit:
+
+```typescript
+// Normal request costs 1
+await limiter.limit(userId);
+
+// Expensive request costs 10
+await limiter.limit(userId, { cost: 10 });
+```
+
+### Duration Options
+
+```typescript
+// Seconds
+new Ratelimit({ duration: "60s", limit: 60 });
+
+// Minutes
+new Ratelimit({ duration: "1m", limit: 100 });
+
+// Hours
+new Ratelimit({ duration: "1h", limit: 1000 });
+
+// Days
+new Ratelimit({ duration: "1d", limit: 10000 });
+
+// Milliseconds
+new Ratelimit({ duration: 60000, limit: 60 });
+```
+
+### Rate Limit Response
+
+```typescript
+interface RatelimitResponse {
+  success: boolean;      // Whether the request is allowed
+  remaining: number;     // Requests remaining in current window
+  reset: number;         // Unix timestamp (ms) when limit resets
+  limit: number;         // Total limit per window
+}
+```
+
+---
+
+## Error Handling
+
+Use try/catch for error handling:
+
+```typescript
+try {
+  const { meta, data } = await unkey.keys.create({
+    apiId: "api_...",
+  });
+
+  console.log("Request ID:", meta.requestId);
+  console.log("Key ID:", data.keyId);
+} catch (err) {
+  console.error("Unkey API error:", err);
+  // Handle error
+}
+```
+
+### Production-Ready Verification
+
+```typescript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY! });
+
+async function verifyApiKey(key: string): Promise<VerifyResult | null> {
+  try {
+    const { data } = await unkey.keys.verifyKey({ key });
+    return data;
+  } catch (err) {
+    // Network error, timeout, etc.
+    console.error("Unkey verification error:", err);
+    
+    // Decide on fallback behavior:
+    // - Return null and deny access (fail closed)
+    // - Return default allow (fail open - risky)
+    return null;
+  }
+}
+```
+
+---
+
+## TypeScript Types
+
+The SDK is fully typed. Import types as needed:
+
+```typescript
+import type {
+  VerifyKeyResult,
+  CreateKeyRequest,
+  CreateKeyResponse,
+  UpdateKeyRequest,
+  Key,
+  Api,
+  RatelimitResponse,
+} from "@unkey/api";
+```
+
+---
+
+## Framework Integration
+
+### Next.js
+
+Use the [@unkey/nextjs](/libraries/ts/nextjs) wrapper:
+
+```typescript
+import { NextRequestWithUnkeyContext, withUnkey } from "@unkey/nextjs";
+
+export const POST = withUnkey(
+  async (req: NextRequestWithUnkeyContext) => {
+    // Key is already verified
+    return Response.json({
+      message: "Hello!",
+      keyId: req.unkey.data.keyId,
+    });
+  },
+  { rootKey: process.env.UNKEY_ROOT_KEY! }
+);
+```
+
+### Hono
+
+Use the [@unkey/hono](/libraries/ts/hono) middleware:
+
+```typescript
+import { Hono } from "hono";
+import { unkey } from "@unkey/hono";
+
+const app = new Hono();
+
+app.use(
+  "/api/*",
+  unkey({
+    rootKey: process.env.UNKEY_ROOT_KEY!,
+  })
+);
+
+app.get("/api/protected", (c) => {
+  const { keyId } = c.get("unkey");
+  return c.json({ message: "Access granted", keyId });
+});
+```
+
+### Express
+
+```typescript
+import express from "express";
+import { Unkey } from "@unkey/api";
+
+const app = express();
+const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY! });
+
+const authMiddleware = async (req, res, next) => {
+  const apiKey = req.headers["x-api-key"];
+
+  if (!apiKey) {
+    return res.status(401).json({ error: "Missing API key" });
+  }
+
+  try {
+    const { data } = await unkey.keys.verifyKey({ key: apiKey });
+
+    if (!data.valid) {
+      return res.status(401).json({ error: data.code });
+    }
+
+    req.unkey = data;
+    next();
+  } catch (err) {
+    console.error(err);
+    res.status(503).json({ error: "Service unavailable" });
+  }
+};
+
+app.get("/api/protected", authMiddleware, (req, res) => {
+  res.json({
+    message: "Access granted",
+    keyId: req.unkey.keyId,
+  });
+});
+
+app.listen(3000);
+```
+
+### Cloudflare Workers
+
+```typescript
+import { Unkey } from "@unkey/api";
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const unkey = new Unkey({ rootKey: env.UNKEY_ROOT_KEY });
+    
+    const apiKey = request.headers.get("x-api-key");
+    
+    if (!apiKey) {
+      return new Response("Missing API key", { status: 401 });
+    }
+    
+    const { data } = await unkey.keys.verifyKey({ key: apiKey });
+    
+    if (!data.valid) {
+      return new Response(`Unauthorized: ${data.code}`, { status: 401 });
+    }
+    
+    return new Response("Access granted");
+  },
+};
+```
+
+---
+
+## Advanced Usage
+
+### Managing APIs
+
+Create and manage API namespaces:
+
+```typescript
+// Create an API
+const { data } = await unkey.apis.createApi({
+  name: "production-api",
+});
+
+console.log("API ID:", data.apiId);
+
+// Get API details
+const api = await unkey.apis.getApi({ apiId: "api_..." });
+
+// List all keys in an API
+const { data: keys } = await unkey.apis.listKeys({
+  apiId: "api_...",
+  limit: 100,
+});
+```
+
+### Identity Management
+
+Link keys to your users:
+
+```typescript
+// Create key with identity
+const { data } = await unkey.keys.create({
+  apiId: "api_...",
+  externalId: "user_123",  // Your user ID
+  meta: {
+    email: "user@example.com",
+    plan: "pro",
+  },
+});
+
+// Verify returns identity info
+const { data: verifyResult } = await unkey.keys.verifyKey({
+  key: "sk_live_...",
+});
+
+console.log(verifyResult.identity?.externalId); // "user_123"
+```
+
+### Custom Caching
+
+Reduce latency with caching:
+
+```typescript
+import { Unkey } from "@unkey/api";
+import { createCache } from "@unkey/cache";
+import { MemoryStore } from "@unkey/cache/stores";
+
+const unkey = new Unkey({
+  rootKey: process.env.UNKEY_ROOT_KEY!,
+  cache: createCache({
+    stores: [new MemoryStore({ persistentMap: new Map() })],
+  }),
+});
+```
+
+---
+
+## Complete Examples
+
+### E-commerce API with Usage Limits
+
+```typescript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY! });
+
+// Create a key for a new customer on the Pro plan
+async function createCustomerKey(customerId: string, plan: string) {
+  const limits = {
+    free: { remaining: 100, refill: null },
+    pro: { remaining: 10000, refill: { amount: 10000, interval: "monthly" as const } },
+    enterprise: { remaining: null, refill: null },
+  };
+
+  const { data } = await unkey.keys.create({
+    apiId: process.env.UNKEY_API_ID!,
+    prefix: "shop",
+    externalId: customerId,
+    name: `${plan} plan`,
+    remaining: limits[plan].remaining ?? undefined,
+    refill: limits[plan].refill ?? undefined,
+    meta: {
+      plan,
+      customerId,
+    },
+  });
+
+  return data.key;
+}
+
+// Verify and track usage
+async function handleApiRequest(request: Request) {
+  const apiKey = request.headers.get("authorization")?.replace("Bearer ", "");
+
+  if (!apiKey) {
+    return new Response("Missing API key", { status: 401 });
+  }
+
+  const { data } = await unkey.keys.verifyKey({ key: apiKey });
+
+  if (!data.valid) {
+    return new Response(`Unauthorized: ${data.code}`, { status: 401 });
+  }
+
+  // Check if customer has credits
+  if (data.credits !== undefined && data.credits <= 0) {
+    return new Response("Credits exhausted", { status: 402 });
+  }
+
+  // Process request...
+  return new Response(JSON.stringify({
+    success: true,
+    creditsRemaining: data.credits,
+  }));
+}
+```
+
+---
+
+## GitHub Repository
+
+<Card title="@unkey/api on GitHub" icon="github" href="https://github.com/unkeyed/sdks/tree/main/api/ts">
+  Complete auto-generated API reference and source code
+</Card>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Next.js SDK" icon="react" href="/libraries/ts/nextjs">
+    Framework wrapper for Next.js
+  </Card>
+  <Card title="Hono SDK" icon="flame" href="/libraries/ts/hono">
+    Middleware for Hono apps
+  </Card>
+  <Card title="Rate Limiting Guide" icon="gauge-high" href="/libraries/ts/ratelimit/ratelimit">
+    Advanced rate limiting features
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference">
+    REST API documentation
+  </Card>
+</CardGroup>

@@ -1,0 +1,109 @@
+---
+title: 'Get Identity'
+description: 'Retrieve an identity by external ID'
+---
+
+## POST /v2/identities.getIdentity
+
+Retrieve an identity by external ID. Returns metadata, rate limits, and other associated data. Use this to check if an identity exists, view configurations, or build management dashboards.
+
+### Required Permissions
+
+Requires `identity.*.read_identity` permission
+
+### Request
+
+<ParamField body="identity" type="string" required>
+  The ID of the identity to retrieve. This can be either the externalId (from your own system that was used during identity creation) or the identityId (the internal ID returned by the identity service).
+  
+  Example: `user_abc123`
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="string" required>
+  The unique internal identifier of this identity within Unkey's system.
+  
+  Example: `id_1234567890abcdef`
+</ResponseField>
+
+<ResponseField name="externalId" type="string" required>
+  The external identifier you provided when creating this identity. Links to your system's user or entity.
+  
+  Example: `user_123`
+</ResponseField>
+
+<ResponseField name="meta" type="object">
+  Custom metadata associated with this identity. Contains any JSON data you stored during creation or updates.
+  
+  Example:
+  ```json
+  {
+    "name": "Alice Smith",
+    "email": "alice@example.com",
+    "plan": "premium"
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="ratelimits" type="array">
+  Array of rate limit configurations for this identity. Each rate limit includes:
+  - `name` - Named identifier
+  - `limit` - Maximum operations allowed
+  - `duration` - Time window in milliseconds
+  
+  Example:
+  ```json
+  [
+    {
+      "name": "requests",
+      "limit": 1000,
+      "duration": 60000
+    }
+  ]
+  ```
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/identities.getIdentity \
+  -H "Authorization: Bearer <your-root-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "identity": "user_123"
+  }'
+```
+
+```json Response
+{
+  "meta": {
+    "requestId": "req_01H9TQPP77V5E48E9SH0BG0ZQX"
+  },
+  "data": {
+    "id": "id_1234567890abcdef",
+    "externalId": "user_123",
+    "meta": {
+      "name": "Alice Smith",
+      "email": "alice@example.com",
+      "plan": "premium"
+    },
+    "ratelimits": [
+      {
+        "name": "requests",
+        "limit": 1000,
+        "duration": 60000
+      }
+    ]
+  }
+}
+```
+
+### Error Codes
+
+- `400` - Bad request (invalid parameters)
+- `401` - Unauthorized (missing or invalid root key)
+- `403` - Forbidden (insufficient permissions - requires `identity.*.read_identity`)
+- `404` - Not found (identity with the specified externalId doesn't exist)
+- `429` - Too many requests (rate limit exceeded)
+- `500` - Internal server error

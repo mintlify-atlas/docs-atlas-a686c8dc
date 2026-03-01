@@ -1,0 +1,662 @@
+---
+title: Go Integration Guide
+description: Complete guide to integrating Unkey API authentication in Go applications with stdlib, Gin, and Echo
+---
+
+## Overview
+
+This guide covers everything you need to protect your Go API with Unkey, including middleware for the standard library, Gin framework, and Echo framework.
+
+**What you'll learn:**
+- Quick setup with the Unkey Go SDK
+- Middleware for `net/http` (standard library)
+- Gin framework integration
+- Echo framework integration
+- Permission-based access control
+- Production-ready patterns
+
+## Prerequisites
+
+- Go 1.21 or higher
+- [Unkey account](https://app.unkey.com/auth/sign-up) (free)
+- [API created](https://app.unkey.com/apis) in your Unkey dashboard
+
+## Quick Start
+
+<Steps>
+
+<Step title="Install the SDK">
+
+```bash
+go get github.com/unkeyed/sdks/api/go/v2@latest
+```
+
+</Step>
+
+<Step title="Set up credentials">
+
+Get a root key from [Settings → Root Keys](https://app.unkey.com/settings/root-keys) and set it as an environment variable:
+
+```bash
+export UNKEY_ROOT_KEY="unkey_..."
+```
+
+</Step>
+
+<Step title="Create middleware">
+
+Here's how to verify API keys with standard library `net/http`:
+
+```go main.go
+package main
+
+import (
+    "context"
+    "net/http"
+    "os"
+    "strings"
+
+    unkey "github.com/unkeyed/sdks/api/go/v2"
+    "github.com/unkeyed/sdks/api/go/v2/models/components"
+)
+
+var unkeyClient *unkey.Unkey
+
+func init() {
+    unkeyClient = unkey.New(
+        unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+    )
+}
+
+// AuthMiddleware verifies API keys on incoming requests
+func AuthMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        // Extract API key from header
+        authHeader := r.Header.Get("Authorization")
+        if authHeader == "" {
+            http.Error(w, `{"error": "Missing Authorization header"}`, http.StatusUnauthorized)
+            return
+        }
+
+        apiKey := strings.TrimPrefix(authHeader, "Bearer ")
+
+        // Verify with Unkey
+        res, err := unkeyClient.Keys.VerifyKey(r.Context(), components.V2KeysVerifyKeyRequestBody{
+            Key: apiKey,
+        })
+
+        if err != nil {
+            http.Error(w, `{"error": "Verification service unavailable"}`, http.StatusServiceUnavailable)
+            return
+        }
+
+        result := res.V2KeysVerifyKeyResponseBody.Data
+
+        if !result.Valid {
+            http.Error(w, `{"error": "Invalid API key"}`, http.StatusUnauthorized)
+            return
+        }
+
+        // Add key info to context for handlers
+        ctx := context.WithValue(r.Context(), "keyId", *result.KeyID)
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+
+func main() {
+    mux := http.NewServeMux()
+    
+    // Protected route
+    mux.HandleFunc("/api/protected", func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        w.Write([]byte(`{"message": "Access granted!"}`))
+    })
+
+    // Wrap with auth middleware
+    http.ListenAndServe(":8080", AuthMiddleware(mux))
+}
+```
+
+</Step>
+
+<Step title="Run and test">
+
+```bash
+go run main.go
+```
+
+Test it with a valid API key:
+
+```bash
+curl -H "Authorization: Bearer YOUR_API_KEY" http://localhost:8080/api/protected
+```
+
+</Step>
+
+</Steps>
+
+## Standard Library (net/http)
+
+### Production-Ready Middleware
+
+Here's a complete middleware implementation with context, options, and error handling:
+
+```go middleware/auth.go
+package middleware
+
+import (
+    "context"
+    "encoding/json"
+    "net/http"
+    "os"
+    "slices"
+    "strings"
+    "time"
+
+    unkey "github.com/unkeyed/sdks/api/go/v2"
+    "github.com/unkeyed/sdks/api/go/v2/models/components"
+)
+
+// KeyContext stores Unkey verification result in request context
+type KeyContext struct {
+    KeyID       string
+    OwnerID     string
+    Meta        map[string]any
+    Permissions []string
+    Roles       []string
+}
+
+type contextKey string
+
+const unkeyContextKey contextKey = "unkey"
+
+var unkeyClient *unkey.Unkey
+
+func init() {
+    unkeyClient = unkey.New(
+        unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+    )
+}
+
+// AuthMiddleware creates a middleware that verifies API keys
+func AuthMiddleware(opts ...AuthOption) func(http.Handler) http.Handler {
+    options := &authOptions{
+        headerName: "Authorization",
+        prefix:     "Bearer ",
+        required:   true,
+    }
+    
+    for _, opt := range opts {
+        opt(options)
+    }
+
+    return func(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            w.Header().Set("Content-Type", "application/json")
+
+            authHeader := r.Header.Get(options.headerName)
+            if authHeader == "" {
+                if options.required {
+                    w.WriteHeader(http.StatusUnauthorized)
+                    json.NewEncoder(w).Encode(map[string]string{
+                        "error": "Missing API key",
+                        "code":  "MISSING_KEY",
+                    })
+                    return
+                }
+                next.ServeHTTP(w, r)
+                return
+            }
+
+            apiKey := strings.TrimPrefix(authHeader, options.prefix)
+
+            ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+            defer cancel()
+
+            res, err := unkeyClient.Keys.VerifyKey(ctx, components.V2KeysVerifyKeyRequestBody{
+                Key: apiKey,
+            })
+
+            if err != nil {
+                w.WriteHeader(http.StatusServiceUnavailable)
+                json.NewEncoder(w).Encode(map[string]string{
+                    "error":   "Verification service unavailable",
+                    "code":    "SERVICE_ERROR",
+                    "message": err.Error(),
+                })
+                return
+            }
+
+            result := res.V2KeysVerifyKeyResponseBody.Data
+
+            if !result.Valid {
+                code := string(result.Code)
+                w.WriteHeader(http.StatusUnauthorized)
+                json.NewEncoder(w).Encode(map[string]any{
+                    "error": "Invalid API key",
+                    "code":  code,
+                })
+                return
+            }
+
+            // Build context
+            keyCtx := &KeyContext{
+                KeyID:       *result.KeyID,
+                Meta:        result.Meta,
+                Permissions: result.Permissions,
+                Roles:       result.Roles,
+            }
+
+            if result.Identity != nil {
+                keyCtx.OwnerID = result.Identity.ExternalID
+            }
+
+            ctx = context.WithValue(r.Context(), unkeyContextKey, keyCtx)
+            next.ServeHTTP(w, r.WithContext(ctx))
+        })
+    }
+}
+
+// AuthOption configures the auth middleware
+type authOptions struct {
+    headerName string
+    prefix     string
+    required   bool
+}
+
+type AuthOption func(*authOptions)
+
+func WithHeaderName(name string) AuthOption {
+    return func(o *authOptions) {
+        o.headerName = name
+    }
+}
+
+func WithPrefix(prefix string) AuthOption {
+    return func(o *authOptions) {
+        o.prefix = prefix
+    }
+}
+
+func WithOptional() AuthOption {
+    return func(o *authOptions) {
+        o.required = false
+    }
+}
+
+// GetKeyContext retrieves the Unkey context from request
+func GetKeyContext(r *http.Request) (*KeyContext, bool) {
+    ctx, ok := r.Context().Value(unkeyContextKey).(*KeyContext)
+    return ctx, ok
+}
+
+// RequirePermission middleware checks if the key has a specific permission
+func RequirePermission(permission string) func(http.Handler) http.Handler {
+    return func(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            keyCtx, ok := GetKeyContext(r)
+            if !ok {
+                w.WriteHeader(http.StatusUnauthorized)
+                json.NewEncoder(w).Encode(map[string]string{
+                    "error": "Authentication required",
+                    "code":  "AUTH_REQUIRED",
+                })
+                return
+            }
+
+            if slices.Contains(keyCtx.Permissions, permission) {
+                next.ServeHTTP(w, r)
+                return
+            }
+
+            w.WriteHeader(http.StatusForbidden)
+            json.NewEncoder(w).Encode(map[string]string{
+                "error": "Insufficient permissions",
+                "code":  "FORBIDDEN",
+                "required": permission,
+            })
+        })
+    }
+}
+```
+
+Usage:
+
+```go main.go
+package main
+
+import (
+    "encoding/json"
+    "net/http"
+    "time"
+    
+    "yourapp/middleware"
+)
+
+func main() {
+    mux := http.NewServeMux()
+
+    // Public route
+    mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+        json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+    })
+
+    // Protected routes
+    mux.Handle("/api/protected", middleware.AuthMiddleware()(http.HandlerFunc(protectedHandler)))
+
+    // Protected with permission check
+    mux.Handle("/api/admin", middleware.AuthMiddleware()(middleware.RequirePermission("admin:read")(http.HandlerFunc(adminHandler))))
+
+    server := &http.Server{
+        Addr:         ":8080",
+        Handler:      mux,
+        ReadTimeout:  15 * time.Second,
+        WriteTimeout: 15 * time.Second,
+    }
+
+    server.ListenAndServe()
+}
+
+func protectedHandler(w http.ResponseWriter, r *http.Request) {
+    keyCtx, _ := middleware.GetKeyContext(r)
+    json.NewEncoder(w).Encode(map[string]any{
+        "message": "Access granted",
+        "key_id":  keyCtx.KeyID,
+    })
+}
+
+func adminHandler(w http.ResponseWriter, r *http.Request) {
+    json.NewEncoder(w).Encode(map[string]string{
+        "message": "Admin access granted",
+    })
+}
+```
+
+## Gin Framework
+
+For the [Gin web framework](https://gin-gonic.com/):
+
+```bash
+go get github.com/gin-gonic/gin
+```
+
+```go main.go
+package main
+
+import (
+    "net/http"
+    "os"
+    "slices"
+    "strings"
+
+    "github.com/gin-gonic/gin"
+    unkey "github.com/unkeyed/sdks/api/go/v2"
+    "github.com/unkeyed/sdks/api/go/v2/models/components"
+)
+
+var unkeyClient *unkey.Unkey
+
+func init() {
+    unkeyClient = unkey.New(
+        unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+    )
+}
+
+func UnkeyAuth() gin.HandlerFunc {
+    return func(c *gin.Context) {
+        authHeader := c.GetHeader("Authorization")
+        if authHeader == "" {
+            c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+                "error": "Missing Authorization header",
+                "code":  "MISSING_KEY",
+            })
+            return
+        }
+
+        apiKey := strings.TrimPrefix(authHeader, "Bearer ")
+
+        res, err := unkeyClient.Keys.VerifyKey(c.Request.Context(), components.V2KeysVerifyKeyRequestBody{
+            Key: apiKey,
+        })
+
+        if err != nil {
+            c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+                "error":   "Verification service unavailable",
+                "code":    "SERVICE_ERROR",
+                "message": err.Error(),
+            })
+            return
+        }
+
+        if !res.V2KeysVerifyKeyResponseBody.Data.Valid {
+            code := string(res.V2KeysVerifyKeyResponseBody.Data.Code)
+            c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+                "error": "Invalid API key",
+                "code":  code,
+            })
+            return
+        }
+
+        // Store verification result in context
+        c.Set("unkey", &res.V2KeysVerifyKeyResponseBody.Data)
+        c.Next()
+    }
+}
+
+func RequirePermission(permission string) gin.HandlerFunc {
+    return func(c *gin.Context) {
+        result, exists := c.Get("unkey")
+        if !exists {
+            c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+                "error": "Authentication required",
+            })
+            return
+        }
+
+        keyResult, ok := result.(*components.V2KeysVerifyKeyResponseData)
+        if !ok || keyResult == nil {
+            c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+                "error": "Invalid authentication context",
+            })
+            return
+        }
+
+        if !slices.Contains(keyResult.Permissions, permission) {
+            c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+                "error":    "Insufficient permissions",
+                "required": permission,
+            })
+            return
+        }
+        c.Next()
+    }
+}
+
+func main() {
+    r := gin.Default()
+
+    // Public routes
+    r.GET("/health", func(c *gin.Context) {
+        c.JSON(http.StatusOK, gin.H{"status": "ok"})
+    })
+
+    // Protected API group
+    api := r.Group("/api")
+    api.Use(UnkeyAuth())
+    {
+        api.GET("/data", func(c *gin.Context) {
+            result, _ := c.Get("unkey")
+            keyResult := result.(*components.V2KeysVerifyKeyResponseData)
+            
+            c.JSON(http.StatusOK, gin.H{
+                "message": "Access granted",
+                "key_id":  *keyResult.KeyID,
+            })
+        })
+    }
+
+    // Admin routes with permission check
+    admin := r.Group("/api/admin")
+    admin.Use(UnkeyAuth(), RequirePermission("admin:read"))
+    {
+        admin.GET("/users", func(c *gin.Context) {
+            c.JSON(http.StatusOK, gin.H{
+                "message": "Admin access granted",
+                "users":   []string{"user1", "user2"},
+            })
+        })
+    }
+
+    r.Run(":8080")
+}
+```
+
+## Echo Framework
+
+For the [Echo web framework](https://echo.labstack.com/):
+
+```bash
+go get github.com/labstack/echo/v4
+```
+
+```go main.go
+package main
+
+import (
+    "net/http"
+    "os"
+    "slices"
+    "strings"
+
+    "github.com/labstack/echo/v4"
+    "github.com/labstack/echo/v4/middleware"
+    unkey "github.com/unkeyed/sdks/api/go/v2"
+    "github.com/unkeyed/sdks/api/go/v2/models/components"
+)
+
+var unkeyClient *unkey.Unkey
+
+func init() {
+    unkeyClient = unkey.New(
+        unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+    )
+}
+
+func UnkeyAuthMiddleware() echo.MiddlewareFunc {
+    return func(next echo.HandlerFunc) echo.HandlerFunc {
+        return func(c echo.Context) error {
+            authHeader := c.Request().Header.Get("Authorization")
+            if authHeader == "" {
+                return c.JSON(http.StatusUnauthorized, map[string]string{
+                    "error": "Missing Authorization header",
+                })
+            }
+
+            apiKey := strings.TrimPrefix(authHeader, "Bearer ")
+
+            res, err := unkeyClient.Keys.VerifyKey(c.Request().Context(), components.V2KeysVerifyKeyRequestBody{
+                Key: apiKey,
+            })
+
+            if err != nil {
+                return c.JSON(http.StatusServiceUnavailable, map[string]string{
+                    "error": "Verification service unavailable",
+                })
+            }
+
+            if !res.V2KeysVerifyKeyResponseBody.Data.Valid {
+                return c.JSON(http.StatusUnauthorized, map[string]string{
+                    "error": "Invalid API key",
+                })
+            }
+
+            c.Set("unkey", &res.V2KeysVerifyKeyResponseBody.Data)
+            return next(c)
+        }
+    }
+}
+
+func RequirePermission(permission string) echo.MiddlewareFunc {
+    return func(next echo.HandlerFunc) echo.HandlerFunc {
+        return func(c echo.Context) error {
+            result := c.Get("unkey")
+            if result == nil {
+                return c.JSON(http.StatusUnauthorized, map[string]string{
+                    "error": "Authentication required",
+                })
+            }
+
+            keyResult, ok := result.(*components.V2KeysVerifyKeyResponseData)
+            if !ok || keyResult == nil {
+                return c.JSON(http.StatusInternalServerError, map[string]string{
+                    "error": "Invalid authentication context",
+                })
+            }
+
+            if !slices.Contains(keyResult.Permissions, permission) {
+                return c.JSON(http.StatusForbidden, map[string]string{
+                    "error":    "Insufficient permissions",
+                    "required": permission,
+                })
+            }
+            return next(c)
+        }
+    }
+}
+
+func main() {
+    e := echo.New()
+    
+    e.Use(middleware.Logger())
+    e.Use(middleware.Recover())
+
+    // Public routes
+    e.GET("/health", func(c echo.Context) error {
+        return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+    })
+
+    // Protected routes
+    api := e.Group("/api")
+    api.Use(UnkeyAuthMiddleware())
+    {
+        api.GET("/data", func(c echo.Context) error {
+            result := c.Get("unkey").(*components.V2KeysVerifyKeyResponseData)
+            return c.JSON(http.StatusOK, map[string]any{
+                "message": "Access granted",
+                "key_id":  *result.KeyID,
+            })
+        })
+    }
+
+    // Admin routes
+    admin := e.Group("/api/admin")
+    admin.Use(UnkeyAuthMiddleware(), RequirePermission("admin:read"))
+    {
+        admin.GET("/users", func(c echo.Context) error {
+            return c.JSON(http.StatusOK, map[string]any{
+                "message": "Admin access granted",
+                "users":   []string{"user1", "user2"},
+            })
+        })
+    }
+
+    e.Start(":8080")
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Add rate limiting" icon="gauge-high" href="/ratelimiting/introduction">
+    Protect your endpoints from abuse
+  </Card>
+  <Card title="Go SDK Reference" icon="book" href="/libraries/go/overview">
+    Complete Go SDK documentation
+  </Card>
+  <Card title="Authorization" icon="user-shield" href="/apis/features/authorization/introduction">
+    Add roles and permissions
+  </Card>
+  <Card title="Cookbook" icon="utensils" href="/cookbook">
+    More Go recipes and examples
+  </Card>
+</CardGroup>

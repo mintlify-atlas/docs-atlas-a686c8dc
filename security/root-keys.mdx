@@ -1,0 +1,182 @@
+---
+title: Root Keys
+description: Manage your Unkey workspace with root keys and fine-grained permissions
+---
+
+Root keys authenticate *your* requests to the Unkey API. They're used to create API keys, manage identities, configure rate limits, and perform other administrative operations.
+
+<Warning>
+Root keys have powerful permissions. Never expose them in client-side code, commit them to git, or share them publicly.
+</Warning>
+
+## Root keys vs API keys
+
+| | Root Keys | API Keys |
+|---|---|---|
+| **Purpose** | Manage Unkey resources | Authenticate your users |
+| **Who uses it** | You (the developer) | Your customers |
+| **Permissions** | Create/update/delete keys, manage APIs | Access your API endpoints |
+| **Where stored** | Your server's environment variables | Given to customers |
+
+## Create a root key
+
+<Steps>
+<Step title="Go to Settings">
+Navigate to [Settings → Root Keys](https://app.unkey.com/settings/root-keys) in your dashboard.
+</Step>
+
+<Step title="Click 'Create New Root Key'">
+<Frame>
+<img src="/images/root-keys/rootkey-modal-start.png"/>
+</Frame>
+</Step>
+
+<Step title="Configure permissions">
+Give the key a descriptive name and select only the permissions it needs.
+
+<Frame>
+<img src="/images/root-keys/rootkey-create.png"/>
+</Frame>
+
+**Common permission sets:**
+
+| Use case | Permissions needed |
+|----------|-------------------|
+| Verify keys only | `api.*.read_key` |
+| Create keys for users | `api.*.create_key`, `api.*.read_key` |
+| Full key management | `api.*.create_key`, `api.*.read_key`, `api.*.update_key`, `api.*.delete_key` |
+| Rate limit overrides | `ratelimit.*.set_override` |
+| Key encryption | `encrypt_key` |
+| Key decryption | `decrypt_key` |
+</Step>
+
+<Step title="Copy and store securely">
+<Note>
+Copy the key immediately — you won't see it again. Unkey only stores a hash.
+</Note>
+
+<Frame>
+<img src="/images/root-keys/copy.png"/>
+</Frame>
+
+Store it in your environment variables:
+
+```bash .env
+UNKEY_ROOT_KEY=unkey_...
+```
+</Step>
+</Steps>
+
+## Permissions system
+
+Root keys use fine-grained permissions to control what operations they can perform. Always follow the principle of least privilege.
+
+### API permissions
+
+- `api.*.create_key` - Create new API keys
+- `api.*.read_key` - Read and verify API keys
+- `api.*.update_key` - Update existing API keys
+- `api.*.delete_key` - Delete API keys
+
+### Rate limiting permissions
+
+- `ratelimit.*.set_override` - Create and modify rate limit overrides
+- `ratelimit.*.list_override` - List rate limit overrides
+- `ratelimit.*.delete_override` - Remove rate limit overrides
+
+### Encryption permissions
+
+- `encrypt_key` - Store keys in encrypted vault for recovery
+- `decrypt_key` - Decrypt and retrieve keys from vault
+
+<Warning>
+Encryption and decryption permissions should only be granted when using the key recovery feature. These are powerful permissions that allow access to plaintext keys.
+</Warning>
+
+## Best practices
+
+<AccordionGroup>
+<Accordion title="Use minimal permissions">
+Only grant the permissions each root key actually needs. A key that only verifies API keys doesn't need `delete_key` permission.
+</Accordion>
+
+<Accordion title="Use separate keys for different services">
+Create dedicated root keys for each service or environment:
+- `production-api-server` — verify and create keys
+- `admin-dashboard` — full management access
+- `billing-service` — update key credits only
+</Accordion>
+
+<Accordion title="Rotate keys periodically">
+Even without a breach, rotate root keys every few months as a security practice. Create a new key, update your services, then delete the old one.
+
+**Rotation workflow:**
+
+1. Create a new root key with the same permissions
+2. Update environment variables in your services
+3. Deploy the updated configuration
+4. Verify the new key is working
+5. Delete the old root key
+6. Check audit logs to confirm no usage of old key
+</Accordion>
+
+<Accordion title="Never log root keys">
+Ensure your logging doesn't capture root keys in request bodies or headers. Configure your logging framework to redact Authorization headers.
+
+```typescript
+// Good - redact authorization header
+logger.info('API request', {
+  url: req.url,
+  headers: {
+    ...req.headers,
+    authorization: '[REDACTED]'
+  }
+});
+```
+</Accordion>
+</AccordionGroup>
+
+## If a root key is leaked
+
+Act immediately:
+
+1. **Revoke the key** — Go to [Settings → Root Keys](https://app.unkey.com/settings/root-keys) and delete the compromised key
+2. **Create a new key** — Generate a replacement with the same permissions
+3. **Update your services** — Deploy the new key to your environment
+4. **Check audit logs** — Review [Audit Logs](https://app.unkey.com/audit) for any unauthorized activity
+5. **Rotate affected API keys** — If you suspect API keys were created or modified, consider rotating them
+
+<Note>
+GitHub secret scanning automatically detects leaked Unkey root keys in public repositories. You'll receive an email alert if your key is found. [Learn more →](/security/key-recovery)
+</Note>
+
+## Environment-specific keys
+
+Create separate root keys for each environment:
+
+```bash
+# Development
+UNKEY_ROOT_KEY=unkey_dev_...
+
+# Staging
+UNKEY_ROOT_KEY=unkey_staging_...
+
+# Production
+UNKEY_ROOT_KEY=unkey_prod_...
+```
+
+This isolation ensures:
+- Development mistakes don't affect production
+- You can revoke development keys without impacting production
+- Audit logs clearly show which environment made each request
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Key Recovery" icon="rotate" href="/security/key-recovery">
+    Learn about recovering leaked keys
+  </Card>
+  <Card title="Audit Logs" icon="scroll" href="/audit-log/introduction">
+    Monitor root key usage
+  </Card>
+</CardGroup>

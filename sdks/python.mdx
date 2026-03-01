@@ -1,0 +1,653 @@
+---
+title: Python SDK
+description: Complete Python SDK documentation with installation, initialization, and usage examples for FastAPI, Flask, and Django
+---
+
+The official Unkey Python SDK (`unkey-py`) provides full access to Unkey's API for managing keys, verifying requests, and rate limiting in Python applications.
+
+## Installation
+
+<CodeGroup>
+
+```bash pip
+pip install unkey-py
+```
+
+```bash poetry
+poetry add unkey-py
+```
+
+```bash uv
+uv add unkey-py
+```
+
+</CodeGroup>
+
+**Requirements:** Python 3.9 or higher
+
+---
+
+## Initialization
+
+Create a client with your root key:
+
+```python
+import os
+from unkey_py import Unkey
+
+unkey = Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"])
+
+# Or inline (not recommended for production)
+unkey = Unkey(bearer_auth="unkey_...")
+```
+
+<Warning>
+Never expose your root key in client-side code or commit it to version control.
+</Warning>
+
+---
+
+## Verify API Keys
+
+Validate a user's API key:
+
+```python
+from unkey_py import Unkey
+import os
+
+with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+    res = unkey.keys.verify_key(request={"key": "sk_live_..."})
+    result = res.data
+    
+    if not result.valid:
+        print(f"Key invalid: {result.code}")
+        return
+    
+    print("Key is valid!")
+    print(f"Key ID: {result.key_id}")
+    print(f"Remaining credits: {result.remaining}")
+```
+
+### Verification Response
+
+The `result` object contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `valid` | `bool` | Whether the key passed all checks |
+| `code` | `str` | Status code (`VALID`, `NOT_FOUND`, `RATE_LIMITED`, etc.) |
+| `key_id` | `str` | The key's unique identifier |
+| `name` | `str?` | Human-readable name of the key |
+| `meta` | `dict?` | Custom metadata |
+| `expires` | `int?` | Unix timestamp (ms) when key expires |
+| `remaining` | `int?` | Remaining uses (if usage limits set) |
+| `enabled` | `bool` | Whether the key is enabled |
+| `roles` | `list[str]?` | Roles attached to the key |
+| `permissions` | `list[str]?` | Permissions attached to the key |
+| `identity` | `dict?` | Identity info |
+| `ratelimits` | `list[dict]?` | Rate limit states |
+
+---
+
+## Framework Integration
+
+### FastAPI
+
+Protect your FastAPI endpoints:
+
+```python
+from fastapi import FastAPI, Header, HTTPException
+from unkey_py import Unkey
+import os
+
+app = FastAPI()
+
+@app.get("/api/protected")
+async def protected_route(x_api_key: str = Header(..., alias="X-API-Key")):
+    with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+        res = unkey.keys.verify_key(request={"key": x_api_key})
+        result = res.data
+
+    if not result.valid:
+        raise HTTPException(
+            status_code=401 if result.code == "NOT_FOUND" else 403,
+            detail=f"Unauthorized: {result.code}"
+        )
+
+    return {
+        "message": "Access granted",
+        "key_id": result.key_id,
+        "remaining_credits": result.remaining
+    }
+```
+
+#### FastAPI Dependency
+
+Create reusable authentication:
+
+```python
+from fastapi import Depends, Header, HTTPException
+from unkey_py import Unkey
+import os
+
+def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
+    with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+        res = unkey.keys.verify_key(request={"key": x_api_key})
+        result = res.data
+
+    if not result.valid:
+        raise HTTPException(status_code=401, detail=result.code)
+    
+    return result
+
+@app.get("/api/protected")
+async def protected_route(key_data = Depends(verify_api_key)):
+    return {
+        "message": "Access granted",
+        "key_id": key_data.key_id,
+    }
+```
+
+### Flask
+
+Integrate with Flask applications:
+
+```python
+from flask import Flask, request, jsonify
+from unkey_py import Unkey
+import os
+
+app = Flask(__name__)
+
+@app.route("/api/protected")
+def protected_route():
+    api_key = request.headers.get("X-API-Key")
+
+    if not api_key:
+        return jsonify({"error": "Missing API key"}), 401
+
+    with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+        res = unkey.keys.verify_key(request={"key": api_key})
+        result = res.data
+
+    if not result.valid:
+        return jsonify({"error": result.code}), 401
+
+    return jsonify({
+        "message": "Access granted",
+        "key_id": result.key_id,
+        "meta": result.meta
+    })
+
+if __name__ == "__main__":
+    app.run(debug=True)
+```
+
+#### Flask Decorator
+
+```python
+from functools import wraps
+from flask import request, jsonify
+from unkey_py import Unkey
+import os
+
+def require_api_key(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        api_key = request.headers.get("X-API-Key")
+        
+        if not api_key:
+            return jsonify({"error": "Missing API key"}), 401
+        
+        with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+            res = unkey.keys.verify_key(request={"key": api_key})
+            result = res.data
+        
+        if not result.valid:
+            return jsonify({"error": result.code}), 401
+        
+        # Attach to request for use in route
+        request.unkey_data = result
+        return f(*args, **kwargs)
+    
+    return decorated_function
+
+@app.route("/api/protected")
+@require_api_key
+def protected_route():
+    return jsonify({
+        "message": "Access granted",
+        "key_id": request.unkey_data.key_id
+    })
+```
+
+### Django
+
+Create custom middleware for Django:
+
+```python
+# middleware/unkey_auth.py
+from django.http import JsonResponse
+from django.conf import settings
+from unkey_py import Unkey
+
+class UnkeyAuthMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        # Skip auth for unprotected paths
+        if request.path.startswith('/admin/'):
+            return self.get_response(request)
+
+        api_key = request.headers.get('X-API-Key')
+
+        if not api_key:
+            return JsonResponse({'error': 'Missing API key'}, status=401)
+
+        with Unkey(bearer_auth=settings.UNKEY_ROOT_KEY) as unkey:
+            res = unkey.keys.verify_key(request={'key': api_key})
+            result = res.data
+
+        if not result.valid:
+            return JsonResponse({'error': result.code}, status=401)
+
+        # Attach key info to request
+        request.unkey_key_id = result.key_id
+        request.unkey_meta = result.meta
+
+        return self.get_response(request)
+```
+
+Add to `settings.py`:
+
+```python
+import os
+
+MIDDLEWARE = [
+    # ... other middleware
+    'myapp.middleware.unkey_auth.UnkeyAuthMiddleware',
+]
+
+UNKEY_ROOT_KEY = os.environ.get("UNKEY_ROOT_KEY")
+```
+
+Use in views:
+
+```python
+from django.http import JsonResponse
+
+def protected_view(request):
+    return JsonResponse({
+        "message": "Access granted",
+        "key_id": request.unkey_key_id,
+    })
+```
+
+---
+
+## Create API Keys
+
+Issue new keys for your users:
+
+```python
+from datetime import datetime, timedelta
+from unkey_py import Unkey
+import os
+
+with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+    res = unkey.keys.create_key(request={
+        "api_id": "api_...",
+        
+        # Optional but recommended
+        "prefix": "sk_live",
+        "external_id": "user_123",
+        "name": "Production key",
+        
+        # Optional: Expiration
+        "expires": int((datetime.now() + timedelta(days=30)).timestamp() * 1000),
+        
+        # Optional: Usage limits
+        "remaining": 1000,
+        "refill": {
+            "amount": 1000,
+            "interval": "monthly",
+        },
+        
+        # Optional: Rate limits
+        "ratelimits": [{
+            "name": "requests",
+            "limit": 100,
+            "duration": 60000,  # milliseconds
+        }],
+        
+        # Optional: Custom metadata
+        "meta": {
+            "plan": "pro",
+            "email": "user@example.com",
+        },
+    })
+    
+    result = res.data
+    
+    # Send to your user - only time you'll see it!
+    print(f"New key: {result.key}")
+    print(f"Key ID: {result.key_id}")
+```
+
+<Warning>
+The full API key is only returned once at creation. Unkey stores only a cryptographic hash.
+</Warning>
+
+### Create Key with Permissions
+
+```python
+with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+    res = unkey.keys.create_key(request={
+        "api_id": "api_...",
+        "prefix": "sk_live",
+        "permissions": ["documents.read", "documents.write"],
+        "roles": ["admin"],
+    })
+```
+
+---
+
+## Update Keys
+
+Modify an existing key:
+
+```python
+with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+    unkey.keys.update_key(request={
+        "key_id": "key_...",
+        "name": "Updated name",
+        "enabled": True,
+        "meta": {"plan": "enterprise"},
+        "ratelimits": [{
+            "name": "requests",
+            "limit": 1000,
+            "duration": 60000,
+        }],
+    })
+```
+
+---
+
+## Delete Keys
+
+Permanently revoke a key:
+
+```python
+with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+    unkey.keys.delete_key(request={"key_id": "key_..."})
+```
+
+Or disable temporarily:
+
+```python
+with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+    unkey.keys.update_key(request={
+        "key_id": "key_...",
+        "enabled": False,
+    })
+```
+
+---
+
+## Rate Limiting
+
+Use the rate limit API directly:
+
+```python
+with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+    res = unkey.ratelimits.limit(request={
+        "namespace": "my-app",
+        "identifier": "user_123",
+        "limit": 100,
+        "duration": 60000,  # milliseconds
+    })
+    
+    result = res.data
+    
+    if not result.success:
+        print(f"Rate limited. Reset at: {result.reset}")
+    else:
+        print(f"Allowed. {result.remaining} requests remaining")
+```
+
+### Cost-Based Rate Limiting
+
+```python
+with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+    res = unkey.ratelimits.limit(request={
+        "namespace": "my-app",
+        "identifier": "user_123",
+        "limit": 100,
+        "duration": 60000,
+        "cost": 10,  # Expensive operation
+    })
+```
+
+---
+
+## Async Support
+
+All methods have async variants:
+
+```python
+import asyncio
+import os
+from unkey_py import Unkey
+
+async def main():
+    async with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+        # Async verification
+        res = await unkey.keys.verify_key_async(request={"key": "sk_live_..."})
+        result = res.data
+        
+        if result.valid:
+            print("Key is valid!")
+            print(f"Key ID: {result.key_id}")
+            
+        # Async key creation
+        new_key_res = await unkey.keys.create_key_async(request={
+            "api_id": "api_...",
+            "prefix": "sk_live",
+        })
+        print(f"Created: {new_key_res.data.key}")
+
+asyncio.run(main())
+```
+
+### Async FastAPI
+
+```python
+from fastapi import FastAPI, Header, HTTPException
+from unkey_py import Unkey
+import os
+
+app = FastAPI()
+
+@app.get("/api/protected")
+async def protected_route(x_api_key: str = Header(..., alias="X-API-Key")):
+    async with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+        res = await unkey.keys.verify_key_async(request={"key": x_api_key})
+        result = res.data
+        
+        if not result.valid:
+            raise HTTPException(status_code=401, detail=result.code)
+        
+        return {
+            "message": "Access granted",
+            "key_id": result.key_id
+        }
+```
+
+---
+
+## Error Handling
+
+Handle errors gracefully:
+
+```python
+from unkey_py import Unkey
+import os
+
+try:
+    with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+        res = unkey.keys.create_key(request={
+            "api_id": "api_...",
+            "name": "My Key"
+        })
+        result = res.data
+        print(f"Created: {result.key}")
+        
+except Exception as e:
+    print(f"API Error: {e}")
+    # Handle specific errors based on exception type
+```
+
+---
+
+## Advanced Usage
+
+### Managing APIs
+
+```python
+with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+    # Create an API
+    res = unkey.apis.create_api(request={
+        "name": "production-api",
+    })
+    print(f"API ID: {res.data.api_id}")
+    
+    # Get API details
+    api = unkey.apis.get_api(request={"api_id": "api_..."})
+    
+    # List keys in an API
+    keys = unkey.apis.list_keys(request={
+        "api_id": "api_...",
+        "limit": 100,
+    })
+```
+
+### Identity Management
+
+```python
+with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+    # Create key with identity
+    res = unkey.keys.create_key(request={
+        "api_id": "api_...",
+        "external_id": "user_123",
+        "meta": {
+            "email": "user@example.com",
+            "plan": "pro",
+        },
+    })
+    
+    # Verify returns identity
+    verify_res = unkey.keys.verify_key(request={"key": "sk_live_..."})
+    print(verify_res.data.identity)  # Contains external_id
+```
+
+---
+
+## Complete Example: API Service
+
+```python
+from fastapi import FastAPI, Header, HTTPException, Depends
+from fastapi.responses import JSONResponse
+from unkey_py import Unkey
+import os
+from typing import Optional
+
+app = FastAPI(title="Protected API")
+
+class UnkeyService:
+    def __init__(self):
+        self.bearer_auth = os.environ["UNKEY_ROOT_KEY"]
+    
+    def verify_key(self, api_key: str):
+        with Unkey(bearer_auth=self.bearer_auth) as unkey:
+            res = unkey.keys.verify_key(request={"key": api_key})
+            return res.data
+
+unkey_service = UnkeyService()
+
+def get_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
+    result = unkey_service.verify_key(x_api_key)
+    
+    if not result.valid:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Unauthorized: {result.code}"
+        )
+    
+    # Check credits
+    if result.remaining is not None and result.remaining <= 0:
+        raise HTTPException(
+            status_code=402,
+            detail="Credits exhausted"
+        )
+    
+    return result
+
+@app.get("/api/data")
+async def get_data(key_data = Depends(get_api_key)):
+    return {
+        "data": "Secret information",
+        "key_id": key_data.key_id,
+        "remaining_credits": key_data.remaining,
+    }
+
+@app.post("/api/provision")
+async def provision_key(user_id: str):
+    with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+        res = unkey.keys.create_key(request={
+            "api_id": os.environ["UNKEY_API_ID"],
+            "prefix": "sk_prod",
+            "external_id": user_id,
+            "remaining": 1000,
+            "refill": {
+                "amount": 1000,
+                "interval": "monthly",
+            },
+        })
+        
+        return {
+            "key": res.data.key,
+            "key_id": res.data.key_id,
+        }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+---
+
+## GitHub Repository
+
+<Card title="Python SDK on GitHub" icon="github" href="https://github.com/unkeyed/sdks/tree/main/api/py">
+  Complete auto-generated API reference and source code
+</Card>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Python Quickstart" icon="rocket" href="/quickstart/apis/python">
+    Step-by-step integration guide
+  </Card>
+  <Card title="Rate Limiting" icon="gauge-high" href="/ratelimiting/introduction">
+    Protect endpoints from abuse
+  </Card>
+  <Card title="Authorization" icon="user-shield" href="/apis/features/authorization/introduction">
+    Add roles and permissions
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference">
+    REST API documentation
+  </Card>
+</CardGroup>

@@ -1,0 +1,134 @@
+---
+title: API Introduction
+description: Get started with the Unkey API - authentication, SDKs, and response structure
+---
+
+Unkey's API provides programmatic access for all resources within our platform. Use it to create and manage API keys, verify authentications, configure rate limits, and more.
+
+## Base URL
+
+All API requests should be made to:
+
+```
+https://api.unkey.com
+```
+
+## SDKs
+
+While you can interact with the Unkey API directly via HTTP, we provide official SDKs to make integration easier:
+
+<CardGroup cols={2}>
+  <Card title="TypeScript/JavaScript" icon="js" href="https://github.com/unkeyed/unkey-js">
+    Official SDK for Node.js and browser environments
+  </Card>
+  <Card title="Python" icon="python" href="https://github.com/unkeyed/unkey-py">
+    Official SDK for Python applications
+  </Card>
+  <Card title="Go" icon="golang" href="https://github.com/unkeyed/unkey-go">
+    Official SDK for Go applications
+  </Card>
+  <Card title="Elixir" icon="code" href="https://github.com/unkeyed/unkey-elixir">
+    Community SDK for Elixir applications
+  </Card>
+</CardGroup>
+
+## Response Envelope
+
+All responses follow a consistent envelope structure that separates operational metadata from actual data. This design provides several benefits:
+
+- **Debugging**: Every response includes a unique `requestId` for tracing issues
+- **Consistency**: Predictable response format across all endpoints
+- **Extensibility**: Easy to add new metadata without breaking existing integrations
+- **Error Handling**: Unified error format with actionable information
+
+### Success Response
+
+Successful API responses follow this structure:
+
+```json
+{
+  "meta": {
+    "requestId": "req_123456"
+  },
+  "data": {
+    // Actual response data here
+  }
+}
+```
+
+<ResponseField name="meta" type="object" required>
+  Operational metadata for the request
+  
+  <Expandable title="properties">
+    <ResponseField name="requestId" type="string" required>
+      Unique identifier for this request. Include this when contacting support for faster issue resolution.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  The actual response data specific to each endpoint. The structure varies by endpoint.
+</ResponseField>
+
+### Paginated Response
+
+List endpoints return paginated results with cursor-based pagination:
+
+```json
+{
+  "meta": {
+    "requestId": "req_123456"
+  },
+  "data": [
+    // Array of results
+  ],
+  "pagination": {
+    "cursor": "next_page_token",
+    "hasMore": true
+  }
+}
+```
+
+<ResponseField name="pagination" type="object">
+  Pagination information for list endpoints
+  
+  <Expandable title="properties">
+    <ResponseField name="cursor" type="string">
+      Token for requesting the next page of results. Pass this value in the `cursor` parameter of your next request.
+    </ResponseField>
+    
+    <ResponseField name="hasMore" type="boolean" required>
+      Whether more results are available beyond the current page.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Rate Limits
+
+The Unkey API implements rate limiting to ensure fair usage and platform stability. Rate limits are applied at the workspace level.
+
+If you exceed the rate limit, you'll receive a `429 Too Many Requests` response. Implement exponential backoff when retrying requests to avoid continued rate limiting.
+
+<Tip>
+  Our SDKs include automatic retry logic with exponential backoff for rate-limited requests.
+</Tip>
+
+## Request IDs
+
+Every API response includes a unique `requestId` in the `meta` object. This identifier is essential for debugging and support:
+
+- Include the `requestId` when reporting issues to support
+- Use it to trace requests through your logs
+- Reference it when debugging unexpected behavior
+
+Store request IDs in your application logs to correlate API responses with your application's behavior.
+
+## Idempotency
+
+Many Unkey API endpoints are idempotent, meaning making the same request multiple times will produce the same result. This is particularly important for:
+
+- Network retry logic
+- Recovering from failures
+- Ensuring data consistency
+
+Refer to individual endpoint documentation to understand idempotency behavior for specific operations.

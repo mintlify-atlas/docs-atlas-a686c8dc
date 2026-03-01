@@ -1,0 +1,715 @@
+---
+title: Go SDK
+description: Complete Go SDK documentation with installation, initialization, and usage examples for API key management and verification
+---
+
+The official Unkey Go SDK provides full access to Unkey's API for managing keys, verifying requests, and rate limiting in Go applications.
+
+## Installation
+
+```bash
+go get github.com/unkeyed/sdks/api/go/v2@latest
+```
+
+**Requirements:** Go 1.21 or higher
+
+---
+
+## Initialization
+
+Create a client with your root key:
+
+```go
+package main
+
+import (
+    "os"
+    unkey "github.com/unkeyed/sdks/api/go/v2"
+)
+
+func main() {
+    client := unkey.New(
+        unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+    )
+    
+    // Use client...
+}
+```
+
+<Warning>
+Never expose your root key in client-side code or commit it to version control.
+</Warning>
+
+---
+
+## Verify API Keys
+
+Validate a user's API key:
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "os"
+
+    unkey "github.com/unkeyed/sdks/api/go/v2"
+    "github.com/unkeyed/sdks/api/go/v2/models/components"
+)
+
+func main() {
+    ctx := context.Background()
+    
+    client := unkey.New(
+        unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+    )
+
+    apiKey := "sk_live_..."  // From request header
+
+    res, err := client.Keys.VerifyKey(ctx, components.V2KeysVerifyKeyRequestBody{
+        Key: apiKey,
+    })
+    
+    if err != nil {
+        log.Fatalf("Verification failed: %v", err)
+    }
+
+    result := res.V2KeysVerifyKeyResponseBody
+    
+    if !result.Valid {
+        fmt.Printf("Key invalid: %s\n", *result.Code)
+        return
+    }
+
+    fmt.Println("Key is valid!")
+    if result.OwnerID != nil {
+        fmt.Printf("Owner: %s\n", *result.OwnerID)
+    }
+    if result.Credits != nil {
+        fmt.Printf("Credits remaining: %d\n", *result.Credits)
+    }
+}
+```
+
+### Verification Response
+
+The response contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Valid` | `bool` | Whether the key passed all checks |
+| `Code` | `*string` | Status code (`VALID`, `NOT_FOUND`, `RATE_LIMITED`, etc.) |
+| `KeyID` | `*string` | The key's unique identifier |
+| `Name` | `*string` | Human-readable name of the key |
+| `Meta` | `map[string]any` | Custom metadata |
+| `Expires` | `*int64` | Unix timestamp (ms) when key expires |
+| `Credits` | `*int64` | Remaining uses |
+| `Enabled` | `*bool` | Whether the key is enabled |
+| `Roles` | `[]string` | Roles attached to the key |
+| `Permissions` | `[]string` | Permissions attached to the key |
+| `Identity` | `*Identity` | Identity info |
+| `Ratelimits` | `[]Ratelimit` | Rate limit states |
+
+---
+
+## HTTP Middleware
+
+Protect your HTTP endpoints with authentication:
+
+### Standard Library (net/http)
+
+```go
+package main
+
+import (
+    "context"
+    "net/http"
+    "os"
+    "strings"
+
+    unkey "github.com/unkeyed/sdks/api/go/v2"
+    "github.com/unkeyed/sdks/api/go/v2/models/components"
+)
+
+var unkeyClient *unkey.Unkey
+
+func init() {
+    unkeyClient = unkey.New(
+        unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+    )
+}
+
+// AuthMiddleware verifies API keys on incoming requests
+func AuthMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        // Extract API key from header
+        authHeader := r.Header.Get("Authorization")
+        if authHeader == "" {
+            http.Error(w, `{"error": "Missing Authorization header"}`, http.StatusUnauthorized)
+            return
+        }
+
+        apiKey := strings.TrimPrefix(authHeader, "Bearer ")
+
+        // Verify with Unkey
+        res, err := unkeyClient.Keys.VerifyKey(r.Context(), components.V2KeysVerifyKeyRequestBody{
+            Key: apiKey,
+        })
+
+        if err != nil {
+            http.Error(w, `{"error": "Verification service unavailable"}`, http.StatusServiceUnavailable)
+            return
+        }
+
+        if !res.V2KeysVerifyKeyResponseBody.Valid {
+            http.Error(w, `{"error": "Invalid API key"}`, http.StatusUnauthorized)
+            return
+        }
+
+        // Add key info to context for handlers
+        ctx := context.WithValue(r.Context(), "keyId", res.V2KeysVerifyKeyResponseBody.KeyID)
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+
+func main() {
+    mux := http.NewServeMux()
+    
+    mux.HandleFunc("/api/protected", func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        w.Write([]byte(`{"message": "Access granted!"}`))   
+    })
+
+    // Wrap with auth middleware
+    http.ListenAndServe(":8080", AuthMiddleware(mux))
+}
+```
+
+### Gin Framework
+
+```go
+package main
+
+import (
+    "net/http"
+    "os"
+    "strings"
+
+    "github.com/gin-gonic/gin"
+    unkey "github.com/unkeyed/sdks/api/go/v2"
+    "github.com/unkeyed/sdks/api/go/v2/models/components"
+)
+
+var unkeyClient *unkey.Unkey
+
+func init() {
+    unkeyClient = unkey.New(
+        unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+    )
+}
+
+func UnkeyAuth() gin.HandlerFunc {
+    return func(c *gin.Context) {
+        authHeader := c.GetHeader("Authorization")
+        if authHeader == "" {
+            c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Missing API key"})
+            return
+        }
+
+        apiKey := strings.TrimPrefix(authHeader, "Bearer ")
+
+        res, err := unkeyClient.Keys.VerifyKey(c.Request.Context(), components.V2KeysVerifyKeyRequestBody{
+            Key: apiKey,
+        })
+
+        if err != nil {
+            c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "Verification failed"})
+            return
+        }
+
+        if !res.V2KeysVerifyKeyResponseBody.Valid {
+            c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+                "error": "Invalid API key",
+                "code":  res.V2KeysVerifyKeyResponseBody.Code,
+            })
+            return
+        }
+
+        // Store verification result in context
+        c.Set("unkeyResult", res.V2KeysVerifyKeyResponseBody)
+        c.Next()
+    }
+}
+
+func main() {
+    r := gin.Default()
+
+    // Protected routes
+    api := r.Group("/api", UnkeyAuth())
+    {
+        api.GET("/data", func(c *gin.Context) {
+            c.JSON(http.StatusOK, gin.H{"message": "Access granted"})
+        })
+    }
+
+    r.Run(":8080")
+}
+```
+
+### Echo Framework
+
+```go
+package main
+
+import (
+    "net/http"
+    "os"
+    "strings"
+
+    "github.com/labstack/echo/v4"
+    "github.com/labstack/echo/v4/middleware"
+    unkey "github.com/unkeyed/sdks/api/go/v2"
+    "github.com/unkeyed/sdks/api/go/v2/models/components"
+)
+
+var unkeyClient *unkey.Unkey
+
+func init() {
+    unkeyClient = unkey.New(
+        unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+    )
+}
+
+func UnkeyAuthMiddleware() echo.MiddlewareFunc {
+    return func(next echo.HandlerFunc) echo.HandlerFunc {
+        return func(c echo.Context) error {
+            authHeader := c.Request().Header.Get("Authorization")
+            if authHeader == "" {
+                return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Missing API key"})
+            }
+
+            apiKey := strings.TrimPrefix(authHeader, "Bearer ")
+
+            res, err := unkeyClient.Keys.VerifyKey(c.Request().Context(), components.V2KeysVerifyKeyRequestBody{
+                Key: apiKey,
+            })
+
+            if err != nil {
+                return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "Verification failed"})
+            }
+
+            if !res.V2KeysVerifyKeyResponseBody.Valid {
+                return c.JSON(http.StatusUnauthorized, map[string]string{
+                    "error": "Invalid API key",
+                    "code":  string(*res.V2KeysVerifyKeyResponseBody.Code),
+                })
+            }
+
+            // Store in context
+            c.Set("keyId", res.V2KeysVerifyKeyResponseBody.KeyID)
+            return next(c)
+        }
+    }
+}
+
+func main() {
+    e := echo.New()
+    
+    e.Use(middleware.Logger())
+    e.Use(middleware.Recover())
+
+    // Protected route
+    e.GET("/api/protected", func(c echo.Context) error {
+        return c.JSON(http.StatusOK, map[string]string{
+            "message": "Access granted",
+        })
+    }, UnkeyAuthMiddleware())
+
+    e.Start(":8080")
+}
+```
+
+---
+
+## Create API Keys
+
+Issue new keys for your users:
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "os"
+    "time"
+
+    unkey "github.com/unkeyed/sdks/api/go/v2"
+    "github.com/unkeyed/sdks/api/go/v2/models/components"
+)
+
+func main() {
+    ctx := context.Background()
+
+    client := unkey.New(
+        unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+    )
+
+    // Optional values
+    prefix := "sk_live"
+    externalID := "user_123"
+    name := "Production key"
+    expires := time.Now().Add(30 * 24 * time.Hour).UnixMilli()
+    remaining := int64(1000)
+
+    res, err := client.Keys.CreateKey(ctx, components.V2KeysCreateKeyRequestBody{
+        APIID:      "api_...",
+        Prefix:     &prefix,
+        ExternalID: &externalID,
+        Name:       &name,
+        Expires:    &expires,
+        Credits: &components.KeyCreditsData{
+            Remaining: &remaining,
+        },
+        Meta: map[string]any{
+            "plan": "pro",
+            "email": "user@example.com",
+        },
+    })
+
+    if err != nil {
+        log.Fatalf("Failed to create key: %v", err)
+    }
+
+    result := res.V2KeysCreateKeyResponseBody
+    
+    // Send this to your user - only time you'll see the full key!
+    fmt.Printf("New key: %s\n", result.Key)
+    fmt.Printf("Key ID: %s\n", result.KeyID)
+}
+```
+
+<Warning>
+The full API key is only returned once at creation. Unkey stores only a cryptographic hash.
+</Warning>
+
+### Create Key with Auto-Refill
+
+```go
+refillAmount := int64(1000)
+refillInterval := components.RefillIntervalMonthly
+
+res, err := client.Keys.CreateKey(ctx, components.V2KeysCreateKeyRequestBody{
+    APIID:  "api_...",
+    Prefix: &prefix,
+    Credits: &components.KeyCreditsData{
+        Remaining: &remaining,
+        RefillInterval: &refillInterval,
+        RefillAmount: &refillAmount,
+    },
+})
+```
+
+### Create Key with Rate Limits
+
+```go
+ratelimitName := "requests"
+
+res, err := client.Keys.CreateKey(ctx, components.V2KeysCreateKeyRequestBody{
+    APIID:  "api_...",
+    Ratelimits: []components.CreateRatelimit{
+        {
+            Name:     &ratelimitName,
+            Limit:    100,
+            Duration: 60000, // milliseconds
+        },
+    },
+})
+```
+
+---
+
+## Update Keys
+
+Modify an existing key:
+
+```go
+enabled := true
+name := "Updated name"
+
+_, err := client.Keys.UpdateKey(ctx, components.V2KeysUpdateKeyRequestBody{
+    KeyID:   "key_...",
+    Name:    &name,
+    Enabled: &enabled,
+    Meta: map[string]any{
+        "plan": "enterprise",
+    },
+})
+
+if err != nil {
+    log.Fatalf("Failed to update key: %v", err)
+}
+```
+
+---
+
+## Delete Keys
+
+Permanently revoke a key:
+
+```go
+_, err := client.Keys.DeleteKey(ctx, components.V2KeysDeleteKeyRequestBody{
+    KeyID: "key_...",
+})
+
+if err != nil {
+    log.Fatalf("Failed to delete key: %v", err)
+}
+```
+
+---
+
+## Rate Limiting
+
+Use the rate limit API directly:
+
+```go
+res, err := client.Ratelimits.Limit(ctx, components.V2RatelimitsLimitRequestBody{
+    Namespace:  "my-app",
+    Identifier: "user_123",
+    Limit:      100,
+    Duration:   60000, // 60 seconds in milliseconds
+})
+
+if err != nil {
+    log.Fatalf("Rate limit check failed: %v", err)
+}
+
+if !res.V2RatelimitsLimitResponseBody.Success {
+    fmt.Printf("Rate limited. Reset at: %d\n", res.V2RatelimitsLimitResponseBody.Reset)
+} else {
+    fmt.Printf("Allowed. %d requests remaining\n", res.V2RatelimitsLimitResponseBody.Remaining)
+}
+```
+
+### Cost-Based Rate Limiting
+
+```go
+cost := int64(10)  // Expensive operation
+
+res, err := client.Ratelimits.Limit(ctx, components.V2RatelimitsLimitRequestBody{
+    Namespace:  "my-app",
+    Identifier: "user_123",
+    Limit:      100,
+    Duration:   60000,
+    Cost:       &cost,
+})
+```
+
+---
+
+## Error Handling
+
+Handle errors with type assertions:
+
+```go
+import "errors"
+
+res, err := client.Keys.CreateKey(ctx, components.V2KeysCreateKeyRequestBody{
+    APIID: "api_...",
+})
+
+if err != nil {
+    // Check for specific error types
+    var apiErr *components.APIError
+    if errors.As(err, &apiErr) {
+        fmt.Printf("API Error: %s - %s\n", apiErr.Code, apiErr.Message)
+    } else {
+        fmt.Printf("Unexpected error: %v\n", err)
+    }
+    return
+}
+
+// Safe to use result
+fmt.Printf("Created key: %s\n", res.V2KeysCreateKeyResponseBody.Key)
+```
+
+---
+
+## Advanced Usage
+
+### Context with Timeout
+
+```go
+import "time"
+
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+res, err := client.Keys.VerifyKey(ctx, components.V2KeysVerifyKeyRequestBody{
+    Key: apiKey,
+})
+```
+
+### Custom HTTP Client
+
+```go
+import (
+    "net/http"
+    "time"
+)
+
+httpClient := &http.Client{
+    Timeout: 10 * time.Second,
+}
+
+client := unkey.New(
+    unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+    unkey.WithClient(httpClient),
+)
+```
+
+### Concurrent Verification
+
+```go
+import "sync"
+
+func verifyKeys(keys []string) {
+    var wg sync.WaitGroup
+    
+    for _, key := range keys {
+        wg.Add(1)
+        go func(k string) {
+            defer wg.Done()
+            
+            res, err := client.Keys.VerifyKey(context.Background(), 
+                components.V2KeysVerifyKeyRequestBody{
+                    Key: k,
+                })
+            
+            if err != nil {
+                log.Printf("Error verifying %s: %v", k, err)
+                return
+            }
+            
+            if res.V2KeysVerifyKeyResponseBody.Valid {
+                log.Printf("Key %s is valid", k)
+            }
+        }(key)
+    }
+    
+    wg.Wait()
+}
+```
+
+---
+
+## Complete Example: API Server
+
+```go
+package main
+
+import (
+    "context"
+    "encoding/json"
+    "log"
+    "net/http"
+    "os"
+    "strings"
+
+    unkey "github.com/unkeyed/sdks/api/go/v2"
+    "github.com/unkeyed/sdks/api/go/v2/models/components"
+)
+
+type Server struct {
+    unkey *unkey.Unkey
+}
+
+func NewServer() *Server {
+    return &Server{
+        unkey: unkey.New(
+            unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+        ),
+    }
+}
+
+func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        authHeader := r.Header.Get("Authorization")
+        if authHeader == "" {
+            http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
+            return
+        }
+
+        apiKey := strings.TrimPrefix(authHeader, "Bearer ")
+
+        res, err := s.unkey.Keys.VerifyKey(r.Context(), components.V2KeysVerifyKeyRequestBody{
+            Key: apiKey,
+        })
+
+        if err != nil {
+            log.Printf("Verification error: %v", err)
+            http.Error(w, "Service unavailable", http.StatusServiceUnavailable)
+            return
+        }
+
+        if !res.V2KeysVerifyKeyResponseBody.Valid {
+            http.Error(w, "Invalid API key", http.StatusUnauthorized)
+            return
+        }
+
+        ctx := context.WithValue(r.Context(), "keyId", res.V2KeysVerifyKeyResponseBody.KeyID)
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+
+func (s *Server) HandleData(w http.ResponseWriter, r *http.Request) {
+    keyId := r.Context().Value("keyId")
+    
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]any{
+        "message": "Access granted",
+        "keyId":   keyId,
+    })
+}
+
+func main() {
+    server := NewServer()
+    
+    mux := http.NewServeMux()
+    mux.HandleFunc("/api/data", server.HandleData)
+    
+    log.Println("Server starting on :8080")
+    log.Fatal(http.ListenAndServe(":8080", server.AuthMiddleware(mux)))
+}
+```
+
+---
+
+## GitHub Repository
+
+<Card title="Go SDK on GitHub" icon="github" href="https://github.com/unkeyed/sdks/tree/main/api/go">
+  Complete auto-generated API reference and source code
+</Card>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Go Quickstart" icon="rocket" href="/quickstart/apis/go">
+    Step-by-step integration guide
+  </Card>
+  <Card title="Rate Limiting" icon="gauge-high" href="/ratelimiting/introduction">
+    Protect endpoints from abuse
+  </Card>
+  <Card title="Authorization" icon="user-shield" href="/apis/features/authorization/introduction">
+    Add roles and permissions
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference">
+    REST API documentation
+  </Card>
+</CardGroup>

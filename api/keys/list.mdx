@@ -1,0 +1,448 @@
+---
+title: List API Keys
+description: Retrieve a paginated list of API keys for dashboard and administrative interfaces
+---
+
+Retrieve a paginated list of API keys for dashboard and administrative interfaces.
+
+Use this to build key management dashboards, filter keys by user with `externalId`, or retrieve key details for administrative purposes. Each key includes status, metadata, permissions, and usage limits.
+
+**Important**: Set `decrypt: true` only in secure contexts to retrieve plaintext key values from recoverable keys.
+
+## Required Permissions
+
+Your root key must have the following permissions:
+
+**For basic key listing**:
+- `api.*.read_key` (to read keys from any API)
+- `api.<api_id>.read_key` (to read keys from a specific API)
+
+**Additionally, you need read access to the API itself**:
+- `api.*.read_api` or `api.<api_id>.read_api`
+
+**For decrypt functionality**:
+- `api.*.decrypt_key` or `api.<api_id>.decrypt_key`
+
+## Request
+
+<ParamField body="apiId" type="string" required>
+  The API namespace whose keys you want to list. Returns all keys in this API, subject to pagination and filters.
+  
+  **Example**: `api_1234abcd`
+</ParamField>
+
+<ParamField body="limit" type="integer" default="100">
+  Maximum number of keys to return per request. Balance between response size and number of pagination calls needed.
+  
+  **Range**: 1-100
+</ParamField>
+
+<ParamField body="cursor" type="string">
+  Pagination cursor from previous response to fetch next page. Use when `hasMore: true` in previous response.
+  
+  **Example**: `key_1234abcd`
+</ParamField>
+
+<ParamField body="externalId" type="string">
+  Filter keys by external ID to find keys for a specific user or entity. Must exactly match the externalId set during key creation.
+  
+  **Example**: `user_1234abcd`
+</ParamField>
+
+<ParamField body="decrypt" type="boolean" default="false">
+  When true, attempts to include the plaintext key value in the response.
+  
+  **SECURITY WARNING**:
+  - This requires special permissions on the calling root key
+  - Only works for keys created with `recoverable: true`
+  - Exposes sensitive key material in the response
+  - Should only be used in secure administrative contexts
+  - Never enable this in user-facing applications
+</ParamField>
+
+<ParamField body="revalidateKeysCache" type="boolean" default="false">
+  **EXPERIMENTAL**: Skip the cache and fetch the keys directly from the database. This ensures you see the most recent state, including keys created moments ago.
+  
+  Use this when:
+  - You've just created a key and need to display it immediately
+  - You need absolute certainty about the current key state
+  - You're debugging cache consistency issues
+  
+  This parameter comes with a performance cost and should be used sparingly.
+</ParamField>
+
+## Response
+
+<ResponseField name="data" type="array" required>
+  Array of API keys with complete configuration and metadata.
+  
+  <ResponseField name="keyId" type="string">
+    The unique identifier for this key in Unkey's system.
+  </ResponseField>
+  
+  <ResponseField name="start" type="string">
+    The first few characters of the key for identification purposes (includes prefix).
+  </ResponseField>
+  
+  <ResponseField name="plaintext" type="string">
+    The complete plaintext key value. Only present when `decrypt: true` and key was created with `recoverable: true`.
+  </ResponseField>
+  
+  <ResponseField name="enabled" type="boolean">
+    Whether the key is currently active.
+  </ResponseField>
+  
+  <ResponseField name="name" type="string">
+    Human-readable name assigned to the key.
+  </ResponseField>
+  
+  <ResponseField name="createdAt" type="integer">
+    Unix timestamp in milliseconds when the key was created.
+  </ResponseField>
+  
+  <ResponseField name="expires" type="integer">
+    Unix timestamp in milliseconds when the key expires. Omitted for permanent keys.
+  </ResponseField>
+  
+  <ResponseField name="meta" type="object">
+    Custom metadata associated with the key.
+  </ResponseField>
+  
+  <ResponseField name="permissions" type="array">
+    List of permissions directly assigned to the key.
+  </ResponseField>
+  
+  <ResponseField name="roles" type="array">
+    List of roles assigned to the key.
+  </ResponseField>
+  
+  <ResponseField name="credits" type="object">
+    Credit configuration for the key.
+    
+    <ResponseField name="remaining" type="integer">
+      Current number of credits available.
+    </ResponseField>
+    
+    <ResponseField name="refill" type="object">
+      Automatic refill configuration.
+      
+      <ResponseField name="amount" type="integer">
+        Number of credits added on each refill.
+      </ResponseField>
+      
+      <ResponseField name="interval" type="string">
+        Refill frequency: `daily` or `monthly`.
+      </ResponseField>
+      
+      <ResponseField name="refillDay" type="integer">
+        Day of month for monthly refills (1-31).
+      </ResponseField>
+    </ResponseField>
+  </ResponseField>
+  
+  <ResponseField name="identity" type="object">
+    Information about the identity associated with this key.
+    
+    <ResponseField name="externalId" type="string">
+      The external identifier from your system.
+    </ResponseField>
+    
+    <ResponseField name="meta" type="object">
+      Custom metadata associated with the identity.
+    </ResponseField>
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="pagination" type="object">
+  Pagination information for navigating through results.
+  
+  <ResponseField name="cursor" type="string">
+    Token for requesting the next page. Pass this as the `cursor` parameter in the next request.
+  </ResponseField>
+  
+  <ResponseField name="hasMore" type="boolean">
+    Whether more results are available beyond the current page.
+  </ResponseField>
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/apis.listKeys \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiId": "api_1234abcd"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const { result } = await unkey.apis.listKeys({
+  apiId: "api_1234abcd",
+});
+
+for (const key of result.keys) {
+  console.log(`${key.name}: ${key.start}`);
+  console.log(`  Enabled: ${key.enabled}`);
+  console.log(`  Credits: ${key.credits?.remaining}`);
+}
+
+if (result.cursor) {
+  console.log("More keys available");
+}
+```
+
+```python Python
+import os
+import requests
+
+response = requests.post(
+    "https://api.unkey.com/v2/apis.listKeys",
+    headers={
+        "Authorization": f"Bearer {os.environ['UNKEY_ROOT_KEY']}",
+        "Content-Type": "application/json"
+    },
+    json={
+        "apiId": "api_1234abcd"
+    }
+)
+
+result = response.json()
+for key in result["data"]:
+    print(f"{key['name']}: {key['start']}")
+    print(f"  Enabled: {key['enabled']}")
+    if "credits" in key:
+        print(f"  Credits: {key['credits']['remaining']}")
+```
+
+```go Go
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/unkeyed/unkey-go"
+	"github.com/unkeyed/unkey-go/models/components"
+)
+
+func main() {
+	uk := unkey.New(
+		unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+	)
+
+	ctx := context.Background()
+	res, err := uk.Apis.ListKeys(ctx, &components.V2ApisListKeysRequestBody{
+		ApiID: "api_1234abcd",
+	})
+
+	if err != nil {
+		panic(err)
+	}
+
+	for _, key := range res.Data {
+		fmt.Printf("%s: %s\n", *key.Name, *key.Start)
+		fmt.Printf("  Enabled: %t\n", key.Enabled)
+	}
+}
+```
+</CodeGroup>
+
+### Filter by User
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/apis.listKeys \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiId": "api_1234abcd",
+    "externalId": "user_1234abcd",
+    "limit": 50
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const { result } = await unkey.apis.listKeys({
+  apiId: "api_1234abcd",
+  externalId: "user_1234abcd",
+  limit: 50,
+});
+
+console.log(`Found ${result.keys.length} keys for user`);
+```
+</CodeGroup>
+
+### Pagination
+
+<CodeGroup>
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+let cursor: string | undefined = undefined;
+const allKeys = [];
+
+do {
+  const { result } = await unkey.apis.listKeys({
+    apiId: "api_1234abcd",
+    limit: 100,
+    cursor,
+  });
+  
+  allKeys.push(...result.keys);
+  cursor = result.cursor;
+} while (cursor);
+
+console.log(`Total keys: ${allKeys.length}`);
+```
+
+```python Python
+import os
+import requests
+
+all_keys = []
+cursor = None
+
+while True:
+    payload = {"apiId": "api_1234abcd", "limit": 100}
+    if cursor:
+        payload["cursor"] = cursor
+    
+    response = requests.post(
+        "https://api.unkey.com/v2/apis.listKeys",
+        headers={
+            "Authorization": f"Bearer {os.environ['UNKEY_ROOT_KEY']}",
+            "Content-Type": "application/json"
+        },
+        json=payload
+    )
+    
+    result = response.json()
+    all_keys.extend(result["data"])
+    
+    if not result.get("pagination", {}).get("hasMore"):
+        break
+    
+    cursor = result["pagination"]["cursor"]
+
+print(f"Total keys: {len(all_keys)}")
+```
+</CodeGroup>
+
+## Response Examples
+
+### Basic Key List
+
+```json
+{
+  "meta": {
+    "requestId": "req_1234abcd"
+  },
+  "data": [
+    {
+      "keyId": "key_1234abcd",
+      "start": "sk_prod",
+      "enabled": true,
+      "name": "Production API Key",
+      "createdAt": 1704067200000,
+      "expires": 1735689600000,
+      "meta": {
+        "plan": "premium",
+        "userId": "user_5678",
+        "environment": "production"
+      },
+      "permissions": ["documents.read", "documents.write"],
+      "roles": ["editor"],
+      "credits": {
+        "remaining": 8500,
+        "refill": {
+          "amount": 10000,
+          "interval": "monthly",
+          "refillDay": 1
+        }
+      },
+      "identity": {
+        "externalId": "user_5678",
+        "meta": {
+          "plan": "premium",
+          "signupDate": "2024-01-15"
+        }
+      }
+    },
+    {
+      "keyId": "key_5678efgh",
+      "start": "sk_dev",
+      "enabled": true,
+      "name": "Development Key",
+      "createdAt": 1704153600000,
+      "meta": {
+        "environment": "development"
+      },
+      "permissions": ["documents.read"],
+      "credits": {
+        "remaining": 500
+      }
+    }
+  ],
+  "pagination": {
+    "cursor": "key_5678efgh",
+    "hasMore": false
+  }
+}
+```
+
+### Empty Response
+
+```json
+{
+  "meta": {
+    "requestId": "req_9876zyxw"
+  },
+  "data": [],
+  "pagination": {
+    "cursor": null,
+    "hasMore": false
+  }
+}
+```
+
+### With Decrypted Keys
+
+```json
+{
+  "meta": {
+    "requestId": "req_admin_decrypt"
+  },
+  "data": [
+    {
+      "keyId": "key_admin_123",
+      "start": "sk_admin",
+      "plaintext": "sk_admin_1234abcdef5678",
+      "enabled": true,
+      "name": "Admin Recovery Key",
+      "createdAt": 1704067200000,
+      "permissions": ["admin.all"],
+      "meta": {
+        "recoverable": true,
+        "purpose": "emergency_access"
+      }
+    }
+  ],
+  "pagination": {
+    "cursor": null,
+    "hasMore": false
+  }
+}
+```

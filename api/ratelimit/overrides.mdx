@@ -1,0 +1,283 @@
+---
+title: 'Rate Limit Overrides'
+description: 'Manage custom rate limit overrides for specific identifiers'
+---
+
+Rate limit overrides allow you to create custom rate limits for specific identifiers, bypassing the namespace default. Use this to create premium tiers with higher limits, apply stricter limits to specific users, or implement emergency throttling.
+
+## Set Override
+
+### POST /v2/ratelimit.setOverride
+
+Create or update a custom rate limit for specific identifiers. Overrides take effect immediately and completely replace the default limit for matching identifiers. Use wildcard patterns (e.g., `premium_*`) to match multiple identifiers.
+
+**Permissions**: Requires `ratelimit.*.set_override` or `ratelimit.<namespace_id>.set_override`
+
+#### Request Parameters
+
+<ParamField body="namespace" type="string" required>
+  The namespace where this override applies.
+  
+  Example: `api.requests`
+</ParamField>
+
+<ParamField body="identifier" type="string" required>
+  The identifier pattern to override. Supports wildcards (e.g., `premium_*`).
+  
+  Example: `premium_user_123`
+</ParamField>
+
+<ParamField body="limit" type="integer" required>
+  The custom rate limit for this identifier.
+  
+  Example: `1000`
+</ParamField>
+
+<ParamField body="duration" type="integer" required>
+  The time window in milliseconds for the custom limit.
+  
+  Example: `60000`
+</ParamField>
+
+#### Response
+
+<ResponseField name="overrideId" type="string" required>
+  The unique identifier of the created or updated override.
+  
+  Example: `ovr_1234567890abcdef`
+</ResponseField>
+
+#### Example
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/ratelimit.setOverride \
+  -H "Authorization: Bearer <your-root-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "namespace": "api.requests",
+    "identifier": "premium_user_123",
+    "limit": 1000,
+    "duration": 60000
+  }'
+```
+
+```json Response
+{
+  "meta": {
+    "requestId": "req_2cGKbMxRyIzhCxo1Idjz8q"
+  },
+  "data": {
+    "overrideId": "ovr_1234567890abcdef"
+  }
+}
+```
+
+---
+
+## Get Override
+
+### POST /v2/ratelimit.getOverride
+
+Retrieve the configuration of a specific rate limit override by its identifier. The identifier must match exactly as specified when creating the override, including wildcard patterns.
+
+**Permissions**: Requires `ratelimit.*.read_override` or `ratelimit.<namespace_id>.read_override`
+
+#### Request Parameters
+
+<ParamField body="namespace" type="string" required>
+  The namespace containing the override.
+  
+  Example: `api.requests`
+</ParamField>
+
+<ParamField body="identifier" type="string" required>
+  The identifier to look up (must match exactly, including wildcards).
+  
+  Example: `premium_user_123`
+</ParamField>
+
+#### Response
+
+<ResponseField name="overrideId" type="string" required>
+  The unique identifier of the override.
+</ResponseField>
+
+<ResponseField name="namespaceId" type="string" required>
+  The namespace ID where this override is configured.
+</ResponseField>
+
+<ResponseField name="identifier" type="string" required>
+  The identifier pattern this override applies to.
+</ResponseField>
+
+<ResponseField name="limit" type="integer" required>
+  The custom rate limit.
+</ResponseField>
+
+<ResponseField name="duration" type="integer" required>
+  The time window in milliseconds.
+</ResponseField>
+
+#### Example
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/ratelimit.getOverride \
+  -H "Authorization: Bearer <your-root-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "namespace": "api.requests",
+    "identifier": "premium_user_123"
+  }'
+```
+
+```json Response
+{
+  "meta": {
+    "requestId": "req_2cGKbMxRyIzhCxo1Idjz8q"
+  },
+  "data": {
+    "overrideId": "ovr_1234567890abcdef",
+    "namespaceId": "ns_1234567890abcdef",
+    "identifier": "premium_user_123",
+    "limit": 1000,
+    "duration": 60000
+  }
+}
+```
+
+---
+
+## List Overrides
+
+### POST /v2/ratelimit.listOverrides
+
+Retrieve a paginated list of all rate limit overrides in a namespace. Use this to audit rate limiting policies, build admin dashboards, or manage override configurations.
+
+**Permissions**: Requires `ratelimit.*.read_override` or `ratelimit.<namespace_id>.read_override`
+
+#### Request Parameters
+
+<ParamField body="namespace" type="string" required>
+  The namespace to list overrides from.
+  
+  Example: `api.requests`
+</ParamField>
+
+<ParamField body="limit" type="integer">
+  Maximum number of overrides to return per request.
+  
+  Example: `20`
+</ParamField>
+
+<ParamField body="cursor" type="string">
+  Pagination cursor from previous response.
+</ParamField>
+
+#### Response
+
+<ResponseField name="overrides" type="array" required>
+  Array of override objects, each containing:
+  - `overrideId` - Unique override identifier
+  - `identifier` - The identifier pattern
+  - `limit` - Custom rate limit
+  - `duration` - Time window in milliseconds
+</ResponseField>
+
+<ResponseField name="cursor" type="string">
+  Pagination cursor for fetching the next page (null if no more results).
+</ResponseField>
+
+#### Example
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/ratelimit.listOverrides \
+  -H "Authorization: Bearer <your-root-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "namespace": "api.requests",
+    "limit": 20
+  }'
+```
+
+```json Response
+{
+  "meta": {
+    "requestId": "req_2cGKbMxRyIzhCxo1Idjz8q"
+  },
+  "data": {
+    "overrides": [
+      {
+        "overrideId": "ovr_1234567890abcdef",
+        "identifier": "premium_user_123",
+        "limit": 1000,
+        "duration": 60000
+      },
+      {
+        "overrideId": "ovr_2345678901bcdefg",
+        "identifier": "premium_*",
+        "limit": 500,
+        "duration": 60000
+      }
+    ],
+    "cursor": "cursor_eyJsYXN0SWQiOiJvdnJfMmhGTGNOeVN6SnppRHlwMkpla2E5ciJ9"
+  }
+}
+```
+
+---
+
+## Delete Override
+
+### POST /v2/ratelimit.deleteOverride
+
+Permanently remove a rate limit override. Affected identifiers immediately revert to the namespace default. Deletion is immediate and permanent - the override cannot be recovered and must be recreated if needed again.
+
+**Permissions**: Requires `ratelimit.*.delete_override` or `ratelimit.<namespace_id>.delete_override`
+
+#### Request Parameters
+
+<ParamField body="namespace" type="string" required>
+  The namespace containing the override.
+  
+  Example: `api.requests`
+</ParamField>
+
+<ParamField body="identifier" type="string" required>
+  The identifier of the override to delete.
+  
+  Example: `premium_user_123`
+</ParamField>
+
+#### Response
+
+Returns an empty data object on successful deletion.
+
+#### Example
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/ratelimit.deleteOverride \
+  -H "Authorization: Bearer <your-root-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "namespace": "api.requests",
+    "identifier": "premium_user_123"
+  }'
+```
+
+```json Response
+{
+  "meta": {
+    "requestId": "req_2cGKbMxRyIzhCxo1Idjz8q"
+  },
+  "data": {}
+}
+```
+
+### Common Error Codes
+
+- `400` - Bad request (invalid parameters)
+- `401` - Unauthorized (missing or invalid root key)
+- `403` - Forbidden (insufficient permissions)
+- `404` - Not found (namespace or override not found)
+- `429` - Too many requests (rate limit exceeded)
+- `500` - Internal server error

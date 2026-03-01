@@ -1,0 +1,580 @@
+---
+title: Usage Limits and Billing
+description: Implement credit-based usage limits with refills for subscription models and pay-as-you-go billing
+---
+
+Usage limits control the total number of requests an API key can make. Unlike rate limits (which control request frequency), usage limits enforce quotas over a key's lifetime. Combined with automatic refills, they enable subscription models, pay-as-you-go billing, and trial tiers.
+
+## Credits system
+
+Unkey's credits system tracks how many requests a key has remaining:
+
+- **Create a key with credits** — Set `credits.remaining` to the initial quota
+- **Each verification consumes credits** — By default, 1 credit per request
+- **Custom costs** — Charge different amounts for different operations
+- **Key becomes invalid at zero** — Verification fails with `code: USAGE_EXCEEDED`
+
+<Note>
+Keys without a `credits` configuration are **unlimited** and never hit usage limits.
+</Note>
+
+## Use cases
+
+<CardGroup cols={2}>
+  <Card title="Subscription quotas" icon="calendar">
+    Pro plan: 50,000 requests/month. Credits reset automatically on the 1st.
+  </Card>
+  <Card title="Pay-per-use APIs" icon="coins">
+    Sell 10,000 requests for $10. Key stops working when credits run out.
+  </Card>
+  <Card title="Trial tiers" icon="flask">
+    Give new users 100 free requests to try your API. They upgrade or stop.
+  </Card>
+  <Card title="One-time tokens" icon="ticket">
+    Generate a key that works exactly once, then expires.
+  </Card>
+</CardGroup>
+
+## Creating keys with usage limits
+
+### Basic credit limit
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.createKey \
+  -H "Authorization: Bearer $UNKEY_ROOT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiId": "api_...",
+    "credits": {
+      "remaining": 1000
+    }
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY });
+
+try {
+  const { meta, data } = await unkey.keys.create({
+    apiId: "api_...",
+    remaining: 1000,
+  });
+
+  console.log(data.key); // Give this to your user
+  console.log(data.keyId); // Save this for updates
+} catch (error) {
+  console.error(error);
+  throw error;
+}
+```
+
+```python Python
+from unkey import Unkey
+
+unkey = Unkey(api_key=os.environ["UNKEY_ROOT_KEY"])
+
+result = unkey.keys.create_key(
+    api_id="api_...",
+    remaining=1000
+)
+
+print(result.key)
+```
+
+</CodeGroup>
+
+### Verification response
+
+When verifying a key with credits, the response includes the remaining balance:
+
+```json
+{
+  "meta": { "requestId": "req_..." },
+  "data": {
+    "valid": true,
+    "code": "VALID",
+    "keyId": "key_...",
+    "credits": 999
+  }
+}
+```
+
+<Note>
+The `credits` field shows remaining credits **after** this verification. If it returns `999`, the key can be used 999 more times.
+</Note>
+
+When credits are exhausted:
+
+```json
+{
+  "meta": { "requestId": "req_..." },
+  "data": {
+    "valid": false,
+    "code": "USAGE_EXCEEDED",
+    "keyId": "key_...",
+    "credits": 0
+  }
+}
+```
+
+## Custom costs per operation
+
+Not all API operations are equal. Complex queries might cost 10 credits while simple lookups cost 1:
+
+<CodeGroup>
+
+```typescript TypeScript
+// Simple read operation - costs 1 credit
+const { meta, data } = await verifyKey({
+  key: request.apiKey,
+  cost: 1,
+});
+
+// Complex analytics query - costs 10 credits
+const { meta, data: heavyData } = await verifyKey({
+  key: request.apiKey,
+  cost: 10,
+});
+
+// AI model inference - costs 50 credits
+const { meta, data: aiData } = await verifyKey({
+  key: request.apiKey,
+  cost: 50,
+});
+```
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.verifyKey \
+  -H "Content-Type: application/json" \
+  -d '{
+    "key": "sk_...",
+    "credits": {
+      "cost": 10
+    }
+  }'
+```
+
+</CodeGroup>
+
+<Warning>
+**Verification fails if the key doesn't have enough credits.** A key with 5 remaining credits will reject a request with `cost: 10`.
+</Warning>
+
+### Cost of zero
+
+Set `cost: 0` to verify a key **without consuming credits**. Useful for:
+- Health checks
+- Fetching key metadata
+- Checking validity before expensive operations
+
+```typescript
+const { meta, data } = await verifyKey({
+  key: request.apiKey,
+  cost: 0,  // Don't consume any credits
+});
+
+if (data.valid) {
+  console.log(`Key has ${data.credits} credits remaining`);
+}
+```
+
+### Dynamic pricing example
+
+Adjust costs based on operation type:
+
+```typescript
+const OPERATION_COSTS = {
+  "read": 1,
+  "write": 2,
+  "delete": 3,
+  "search": 5,
+  "export": 10,
+  "ai-inference": 50,
+} as const;
+
+export async function handleRequest(request: Request) {
+  const operation = request.headers.get("X-Operation") as keyof typeof OPERATION_COSTS;
+  const cost = OPERATION_COSTS[operation] ?? 1;
+
+  try {
+    const { meta, data } = await verifyKey({
+      key: request.apiKey,
+      cost,
+    });
+
+    if (!data.valid) {
+      if (data.code === "USAGE_EXCEEDED") {
+        return Response.json(
+          { error: "Out of credits. Please upgrade your plan." },
+          { status: 402 } // Payment Required
+        );
+      }
+      return Response.json({ error: data.code }, { status: 401 });
+    }
+
+    // Process the request
+    return Response.json({ 
+      result: "success",
+      creditsRemaining: data.credits,
+      creditsUsed: cost,
+    });
+  } catch (error) {
+    console.error(error);
+    return Response.json({ error: "Internal error" }, { status: 500 });
+  }
+}
+```
+
+## Auto-refill for subscriptions
+
+Auto-refill automatically restores credits on a schedule. Perfect for subscription models:
+
+### Monthly refill
+
+Credits reset on the 1st of each month:
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.createKey \
+  -H "Authorization: Bearer $UNKEY_ROOT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiId": "api_...",
+    "credits": {
+      "remaining": 50000,
+      "refill": {
+        "interval": "monthly",
+        "amount": 50000
+      }
+    }
+  }'
+```
+
+```typescript TypeScript
+try {
+  const { meta, data } = await unkey.keys.create({
+    apiId: "api_...",
+    remaining: 50000,
+    refill: {
+      interval: "monthly",
+      amount: 50000,
+    },
+  });
+  console.log(data.keyId);
+} catch (error) {
+  console.error(error);
+  throw error;
+}
+```
+
+</CodeGroup>
+
+### Custom refill day
+
+If billing cycles start mid-month, use `refillDay`:
+
+```typescript
+try {
+  const { meta, data } = await unkey.keys.create({
+    apiId: "api_...",
+    remaining: 50000,
+    refill: {
+      interval: "monthly",
+      amount: 50000,
+      refillDay: 15,  // Refills on the 15th of each month
+    },
+  });
+} catch (error) {
+  console.error(error);
+  throw error;
+}
+```
+
+<Note>
+For months with fewer days (e.g., February with 28 days), refills happen on the last day of the month if `refillDay` exceeds the month's length.
+</Note>
+
+### Daily refill
+
+For free tiers with daily quotas:
+
+```typescript
+try {
+  const { meta, data } = await unkey.keys.create({
+    apiId: "api_...",
+    remaining: 100,
+    refill: {
+      interval: "daily",
+      amount: 100,  // Resets to 100 at midnight UTC
+    },
+  });
+} catch (error) {
+  console.error(error);
+  throw error;
+}
+```
+
+<Warning>
+**Refill replaces the current balance — it doesn't add to it.** A key with 50 remaining credits will have exactly 1000 after a refill of 1000, not 1050.
+</Warning>
+
+## Managing credits
+
+### Add credits manually
+
+When users purchase additional credits:
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.updateCredits \
+  -H "Authorization: Bearer $UNKEY_ROOT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_...",
+    "operation": "increment",
+    "value": 5000
+  }'
+```
+
+```typescript TypeScript
+try {
+  const { meta, data } = await unkey.keys.updateCredits({
+    keyId: "key_...",
+    operation: "increment",
+    value: 5000,
+  });
+} catch (error) {
+  console.error(error);
+  throw error;
+}
+```
+
+</CodeGroup>
+
+### Set exact credit amount
+
+```typescript
+// Set credits to a specific value (overwrite)
+await unkey.keys.updateCredits({
+  keyId: "key_...",
+  operation: "set",
+  value: 10000,
+});
+```
+
+### Deduct credits
+
+```typescript
+// Manually deduct credits (e.g., for batch operations)
+await unkey.keys.updateCredits({
+  keyId: "key_...",
+  operation: "decrement",
+  value: 100,
+});
+```
+
+### Remove usage limits
+
+Make a key unlimited:
+
+```bash
+curl -X POST https://api.unkey.com/v2/keys.updateKey \
+  -H "Authorization: Bearer $UNKEY_ROOT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_...",
+    "credits": null
+  }'
+```
+
+## Subscription tier patterns
+
+### Tiered plans
+
+```typescript
+const PLANS = {
+  free: { credits: 100, refill: { interval: "daily", amount: 100 } },
+  starter: { credits: 10000, refill: { interval: "monthly", amount: 10000 } },
+  pro: { credits: 50000, refill: { interval: "monthly", amount: 50000 } },
+  enterprise: null, // Unlimited
+} as const;
+
+export async function createKeyForPlan(plan: keyof typeof PLANS) {
+  const config = PLANS[plan];
+
+  if (!config) {
+    // Enterprise - no limits
+    return await unkey.keys.create({ apiId: "api_..." });
+  }
+
+  return await unkey.keys.create({
+    apiId: "api_...",
+    remaining: config.credits,
+    refill: config.refill,
+  });
+}
+```
+
+### Upgrade flow
+
+When a user upgrades mid-cycle:
+
+```typescript
+export async function upgradePlan(
+  keyId: string,
+  newPlan: "starter" | "pro" | "enterprise"
+) {
+  const planConfig = PLANS[newPlan];
+
+  if (!planConfig) {
+    // Upgraded to unlimited
+    await unkey.keys.updateKey({
+      keyId,
+      credits: null,
+    });
+    return;
+  }
+
+  // Give them the new allocation immediately
+  await unkey.keys.updateKey({
+    keyId,
+    credits: {
+      remaining: planConfig.credits,
+      refill: planConfig.refill,
+    },
+  });
+}
+```
+
+### Pay-as-you-go with top-ups
+
+```typescript
+// Create a pay-as-you-go key (no auto-refill)
+const { data } = await unkey.keys.create({
+  apiId: "api_...",
+  remaining: 1000,
+});
+
+// User purchases more credits
+export async function purchaseCredits(keyId: string, amount: number) {
+  await unkey.keys.updateCredits({
+    keyId,
+    operation: "increment",
+    value: amount,
+  });
+
+  // Record the purchase in your database
+  await db.purchases.create({
+    keyId,
+    amount,
+    timestamp: new Date(),
+  });
+}
+```
+
+## Combined with rate limits
+
+Usage limits and rate limits solve different problems. Use both together:
+
+```typescript
+try {
+  const { meta, data } = await unkey.keys.create({
+    apiId: "api_...",
+    // Total quota: 10,000 requests/month
+    remaining: 10000,
+    refill: {
+      interval: "monthly",
+      amount: 10000,
+    },
+    // Burst protection: Max 100 requests/minute
+    ratelimits: [
+      {
+        name: "requests",
+        limit: 100,
+        duration: 60000,
+        autoApply: true,
+      },
+    ],
+  });
+} catch (error) {
+  console.error(error);
+  throw error;
+}
+```
+
+| Feature | Usage Limits | Rate Limits |
+|---------|--------------|-------------|
+| Controls | Total requests over key lifetime | Requests per time window |
+| Resets | Manual or scheduled refill | Automatic after window expires |
+| Use case | Billing, quotas, trials | Abuse protection, fair usage |
+| Example | "10,000 requests total" | "100 requests per minute" |
+
+## Analytics and billing
+
+Monitor credit consumption for billing insights:
+
+```typescript
+export async function getCreditUsage(keyId: string) {
+  const key = await unkey.keys.get({ keyId });
+
+  return {
+    remaining: key.remaining,
+    used: key.credits.initial - key.remaining,
+    refillAmount: key.credits.refill?.amount,
+    refillInterval: key.credits.refill?.interval,
+    lastRefill: key.credits.refill?.lastRefillAt,
+    nextRefill: calculateNextRefill(key.credits.refill),
+  };
+}
+
+// Alert when credits are low
+export async function checkLowCredits(keyId: string) {
+  const key = await unkey.keys.get({ keyId });
+  const threshold = 0.1; // 10% remaining
+
+  if (key.remaining < (key.credits.refill?.amount ?? 0) * threshold) {
+    await sendEmail({
+      to: key.owner,
+      subject: "Low API credits",
+      body: `Your API key has ${key.remaining} credits remaining.`,
+    });
+  }
+}
+```
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Set realistic quotas">
+    Analyze your API's actual usage patterns before setting limits. Too restrictive and you'll frustrate users; too generous and you'll hurt profitability.
+  </Accordion>
+  
+  <Accordion title="Notify before limits are hit">
+    Send alerts when users reach 80% and 90% of their quota. Give them time to upgrade or purchase more credits.
+  </Accordion>
+  
+  <Accordion title="Use cost-based pricing for fairness">
+    Charge more for expensive operations. A 5-minute AI inference shouldn't cost the same as a 10ms database lookup.
+  </Accordion>
+  
+  <Accordion title="Combine with rate limits">
+    Usage limits alone won't prevent abuse. A user could burn through 10,000 credits in 10 seconds without rate limiting.
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Rate limit overrides" icon="gauge-high" href="/advanced/rate-limit-overrides">
+    Adjust rate limits dynamically per customer
+  </Card>
+  <Card title="Key expiration" icon="clock" href="/advanced/key-expiration">
+    Time-based limits for temporary access
+  </Card>
+</CardGroup>

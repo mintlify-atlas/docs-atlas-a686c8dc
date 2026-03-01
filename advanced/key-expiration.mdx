@@ -1,0 +1,545 @@
+---
+title: Key Expiration Strategies
+description: Create time-limited API keys with automatic expiration and cleanup for trials, sessions, and security rotations
+---
+
+Temporary keys automatically become invalid after a specified time. Unkey handles expiration and cleanup for you, making it easy to implement trial access, time-limited integrations, and security rotation policies.
+
+## How expiration works
+
+1. **Set an expiration timestamp** — Specify `expires` as a Unix timestamp in milliseconds
+2. **Key works until expiration** — Verification succeeds normally until the time is reached
+3. **Automatic invalidation** — After expiration, verification returns `code: EXPIRED`
+4. **Automatic cleanup** — Unkey periodically removes expired keys from the system
+
+<Note>
+Keys without an `expires` field are **permanent** and never expire unless manually revoked.
+</Note>
+
+## Use cases
+
+<CardGroup cols={2}>
+  <Card title="Trial access" icon="flask">
+    Give new users a 7-day trial key. It stops working automatically, no manual cleanup needed.
+  </Card>
+  <Card title="Session-based access" icon="clock">
+    Generate keys that last for a user session (e.g., 24 hours). Perfect for temporary integrations.
+  </Card>
+  <Card title="Time-limited partnerships" icon="handshake">
+    Partner needs API access for a 3-month project. Key expires when the contract ends.
+  </Card>
+  <Card title="Security rotation" icon="rotate">
+    Force key rotation by issuing keys that expire after 90 days.
+  </Card>
+</CardGroup>
+
+## Creating temporary keys
+
+### Basic expiration
+
+<CodeGroup>
+
+```bash cURL
+# Key expires in 24 hours
+EXPIRES=$(($(date +%s) * 1000 + 86400000))
+
+curl -X POST https://api.unkey.com/v2/keys.createKey \
+  -H "Authorization: Bearer $UNKEY_ROOT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiId": "api_...",
+    "expires": '$EXPIRES'
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY });
+
+// Key expires in 24 hours
+const expires = Date.now() + 24 * 60 * 60 * 1000;
+
+try {
+  const { meta, data } = await unkey.keys.create({
+    apiId: "api_...",
+    expires,
+  });
+
+  console.log(data.key);
+  console.log(`Expires at: ${new Date(expires).toISOString()}`);
+} catch (error) {
+  console.error(error);
+  throw error;
+}
+```
+
+```python Python
+import time
+from unkey import Unkey
+
+# Key expires in 24 hours
+expires = int(time.time() * 1000) + (24 * 60 * 60 * 1000)
+
+unkey = Unkey(api_key=os.environ["UNKEY_ROOT_KEY"])
+
+result = unkey.keys.create_key(
+    api_id="api_...",
+    expires=expires
+)
+
+print(result.key)
+```
+
+</CodeGroup>
+
+### Common expiration durations
+
+```typescript
+const EXPIRATION_TIMES = {
+  oneHour: Date.now() + 60 * 60 * 1000,
+  oneDay: Date.now() + 24 * 60 * 60 * 1000,
+  oneWeek: Date.now() + 7 * 24 * 60 * 60 * 1000,
+  oneMonth: Date.now() + 30 * 24 * 60 * 60 * 1000,
+  threeMonths: Date.now() + 90 * 24 * 60 * 60 * 1000,
+  oneYear: Date.now() + 365 * 24 * 60 * 60 * 1000,
+} as const;
+
+// Create a 7-day trial key
+const { data } = await unkey.keys.create({
+  apiId: "api_...",
+  expires: EXPIRATION_TIMES.oneWeek,
+});
+```
+
+### Specific date expiration
+
+```typescript
+// Expire on a specific date (e.g., end of contract)
+const contractEnd = new Date("2026-12-31T23:59:59Z").getTime();
+
+const { data } = await unkey.keys.create({
+  apiId: "api_...",
+  expires: contractEnd,
+  name: "Partner Integration - Q4 2026",
+});
+```
+
+## Verification response
+
+Expired keys return a specific error code:
+
+```json
+{
+  "meta": { "requestId": "req_..." },
+  "data": {
+    "valid": false,
+    "code": "EXPIRED",
+    "keyId": "key_..."
+  }
+}
+```
+
+Handle expiration in your application:
+
+```typescript
+import { verifyKey } from "@unkey/api";
+
+try {
+  const { meta, data } = await verifyKey({
+    key: request.apiKey,
+  });
+
+  if (!data.valid) {
+    if (data.code === "EXPIRED") {
+      return Response.json(
+        { error: "Your API key has expired. Please request a new one." },
+        { status: 401 }
+      );
+    }
+    return Response.json({ error: data.code }, { status: 401 });
+  }
+
+  // Key is valid - continue
+} catch (error) {
+  console.error(error);
+  return Response.json({ error: "Internal error" }, { status: 500 });
+}
+```
+
+## Managing expiration
+
+### Extend expiration
+
+Grant more time to an existing key:
+
+<CodeGroup>
+
+```bash cURL
+# Extend by 7 more days from now
+NEW_EXPIRY=$(($(date +%s) * 1000 + 604800000))
+
+curl -X POST https://api.unkey.com/v2/keys.updateKey \
+  -H "Authorization: Bearer $UNKEY_ROOT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_...",
+    "expires": '$NEW_EXPIRY'
+  }'
+```
+
+```typescript TypeScript
+// Extend by 7 more days from now
+const newExpiry = Date.now() + 7 * 24 * 60 * 60 * 1000;
+
+try {
+  const { meta, data } = await unkey.keys.update({
+    keyId: "key_...",
+    expires: newExpiry,
+  });
+} catch (error) {
+  console.error(error);
+  throw error;
+}
+```
+
+</CodeGroup>
+
+### Remove expiration
+
+Make a temporary key permanent:
+
+```typescript
+// Remove expiration - key now lasts forever
+await unkey.keys.update({
+  keyId: "key_...",
+  expires: null,
+});
+```
+
+### Check time remaining
+
+Calculate how much time a key has left:
+
+```typescript
+export async function getKeyTimeRemaining(keyId: string) {
+  const key = await unkey.keys.get({ keyId });
+
+  if (!key.expires) {
+    return { expiresAt: null, remaining: Infinity, status: "permanent" };
+  }
+
+  const now = Date.now();
+  const remaining = key.expires - now;
+
+  if (remaining <= 0) {
+    return { expiresAt: key.expires, remaining: 0, status: "expired" };
+  }
+
+  return {
+    expiresAt: key.expires,
+    remaining,
+    remainingDays: Math.floor(remaining / (24 * 60 * 60 * 1000)),
+    status: "active",
+  };
+}
+```
+
+## Expiration strategies
+
+### Trial-to-paid conversion
+
+Grant trial access with automatic expiration, then issue a permanent key on upgrade:
+
+```typescript
+export async function createTrialKey(userId: string) {
+  const trialDuration = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+  try {
+    const { meta, data } = await unkey.keys.create({
+      apiId: "api_...",
+      expires: Date.now() + trialDuration,
+      credits: {
+        remaining: 1000, // Trial also limited to 1000 requests
+      },
+      name: `Trial - ${userId}`,
+      meta: {
+        userId,
+        tier: "trial",
+      },
+    });
+
+    // Notify user about trial expiration
+    await scheduleEmail({
+      to: userId,
+      template: "trial-reminder",
+      sendAt: data.expires! - 24 * 60 * 60 * 1000, // 1 day before
+    });
+
+    return data.key;
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
+}
+
+export async function convertToProKey(trialKeyId: string, userId: string) {
+  // Revoke trial key
+  await unkey.keys.revoke({ keyId: trialKeyId });
+
+  // Issue new unlimited key
+  const { data } = await unkey.keys.create({
+    apiId: "api_...",
+    // No expires field - permanent key
+    remaining: 50000,
+    refill: {
+      interval: "monthly",
+      amount: 50000,
+    },
+    name: `Pro - ${userId}`,
+    meta: {
+      userId,
+      tier: "pro",
+    },
+  });
+
+  return data.key;
+}
+```
+
+### Rotating credentials
+
+Force regular key rotation for security:
+
+```typescript
+export async function createRotatingKey(userId: string) {
+  const rotationPeriod = 90 * 24 * 60 * 60 * 1000; // 90 days
+
+  const { data } = await unkey.keys.create({
+    apiId: "api_...",
+    expires: Date.now() + rotationPeriod,
+    name: `Rotating Key - ${userId}`,
+    meta: {
+      userId,
+      rotationPolicy: "90-days",
+    },
+  });
+
+  // Schedule rotation reminder
+  await scheduleRotationReminder({
+    keyId: data.keyId,
+    userId,
+    notifyDaysBefore: 14,
+  });
+
+  return data.key;
+}
+
+// Automatically issue a new key before expiration
+export async function autoRotateKey(oldKeyId: string) {
+  const oldKey = await unkey.keys.get({ keyId: oldKeyId });
+
+  // Create new key with same configuration
+  const { data } = await unkey.keys.create({
+    apiId: oldKey.apiId,
+    expires: Date.now() + 90 * 24 * 60 * 60 * 1000,
+    remaining: oldKey.remaining,
+    ratelimits: oldKey.ratelimits,
+    name: oldKey.name,
+    meta: oldKey.meta,
+  });
+
+  // Notify user of new key
+  await sendEmail({
+    to: oldKey.meta.userId,
+    subject: "New API key issued",
+    body: `Your old key expires soon. New key: ${data.key}`,
+  });
+
+  return data.key;
+}
+```
+
+### Session-based keys
+
+Generate short-lived keys for authenticated sessions:
+
+```typescript
+export async function createSessionKey(
+  userId: string,
+  sessionDurationHours: number = 24
+) {
+  const expires = Date.now() + sessionDurationHours * 60 * 60 * 1000;
+
+  const { data } = await unkey.keys.create({
+    apiId: "api_...",
+    expires,
+    name: `Session - ${userId}`,
+    meta: {
+      userId,
+      type: "session",
+      createdAt: new Date().toISOString(),
+    },
+  });
+
+  return data.key;
+}
+
+// Cleanup expired session keys (run as cron job)
+export async function cleanupExpiredSessions() {
+  const allKeys = await unkey.keys.list({ apiId: "api_..." });
+  const now = Date.now();
+
+  const expiredKeys = allKeys.filter(
+    (key) => key.meta?.type === "session" && key.expires && key.expires < now
+  );
+
+  for (const key of expiredKeys) {
+    await unkey.keys.revoke({ keyId: key.keyId });
+  }
+
+  console.log(`Cleaned up ${expiredKeys.length} expired session keys`);
+}
+```
+
+### Partner integrations
+
+Time-limited access for external partners:
+
+```typescript
+export async function createPartnerKey({
+  partnerName,
+  projectName,
+  startDate,
+  endDate,
+}: {
+  partnerName: string;
+  projectName: string;
+  startDate: Date;
+  endDate: Date;
+}) {
+  const { data } = await unkey.keys.create({
+    apiId: "api_...",
+    expires: endDate.getTime(),
+    name: `${partnerName} - ${projectName}`,
+    meta: {
+      partnerName,
+      projectName,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      type: "partner",
+    },
+  });
+
+  // Log the integration
+  await db.partnerIntegrations.create({
+    keyId: data.keyId,
+    partnerName,
+    projectName,
+    startDate,
+    endDate,
+  });
+
+  return data.key;
+}
+```
+
+## Combining expiration with other limits
+
+Temporary keys work with all other features:
+
+```typescript
+// 7-day trial with multiple constraints
+const { data } = await unkey.keys.create({
+  apiId: "api_...",
+  // Time limit: 7 days
+  expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
+  // Usage limit: 1000 requests total
+  credits: {
+    remaining: 1000,
+  },
+  // Rate limit: Max 100 requests/minute
+  ratelimits: [
+    {
+      name: "requests",
+      limit: 100,
+      duration: 60000,
+      autoApply: true,
+    },
+  ],
+  name: "Trial Key",
+});
+```
+
+| Feature | Expiration | Usage Limits |
+|---------|-----------|-------------|
+| Limited by | Time | Request count |
+| Expires when | Clock hits timestamp | Credits reach 0 |
+| Best for | Time-bound access, trials | Pay-per-use, quotas |
+| Example | "Access for 7 days" | "1000 requests total" |
+
+<Note>
+**Use both for robust trials:** "7 days OR 1000 requests, whichever comes first." This prevents abuse while giving flexibility.
+</Note>
+
+## Notification strategies
+
+Alert users before keys expire:
+
+```typescript
+export async function checkExpiringKeys() {
+  const allKeys = await unkey.keys.list({ apiId: "api_..." });
+  const now = Date.now();
+  const warningThreshold = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+  for (const key of allKeys) {
+    if (!key.expires) continue;
+
+    const timeRemaining = key.expires - now;
+
+    // Send warning if expiring within 7 days
+    if (timeRemaining > 0 && timeRemaining < warningThreshold) {
+      await sendEmail({
+        to: key.meta?.userId,
+        subject: "API key expiring soon",
+        body: `Your API key "${key.name}" expires in ${Math.floor(
+          timeRemaining / (24 * 60 * 60 * 1000)
+        )} days.`,
+      });
+    }
+  }
+}
+
+// Run daily as a cron job
+```
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Always notify before expiration">
+    Send reminders at 7 days, 3 days, and 1 day before a key expires. Give users time to renew or rotate.
+  </Accordion>
+  
+  <Accordion title="Use expiration for trials, not production">
+    Production keys should be long-lived or permanent. Expiration is best for temporary access scenarios.
+  </Accordion>
+  
+  <Accordion title="Offer easy renewal">
+    When a key is about to expire, provide a one-click renewal option. Don't force users to manually create new keys.
+  </Accordion>
+  
+  <Accordion title="Log expiration events">
+    Track when keys expire and why. This helps you understand trial conversion rates and rotation compliance.
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Usage limits" icon="calculator" href="/advanced/usage-limits">
+    Combine time limits with request quotas
+  </Card>
+  <Card title="Multi-tenant applications" icon="building" href="/advanced/multi-tenant">
+    Manage keys across multiple organizations
+  </Card>
+</CardGroup>

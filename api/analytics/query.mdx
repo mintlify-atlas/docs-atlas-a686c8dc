@@ -1,0 +1,131 @@
+---
+title: 'Query Analytics'
+description: 'Execute custom SQL queries against your analytics data'
+---
+
+## Overview
+
+The Analytics API allows you to query your key verification data using SQL. This enables you to build custom reports, dashboards, and insights into how your API keys are being used.
+
+**Note**: This endpoint is for executing custom SQL queries. For complete documentation including available tables, columns, data types, and query examples, see the Analytics schema reference in the API documentation.
+
+## POST /v2/analytics.getVerifications
+
+Execute custom SQL queries against your key verification analytics. Only SELECT queries are allowed for security.
+
+### Request
+
+<ParamField body="query" type="string" required>
+  SQL query to execute against your analytics data. Only SELECT queries are allowed.
+  
+  Example:
+  ```sql
+  SELECT COUNT(*) as total 
+  FROM key_verifications_v1 
+  WHERE outcome = 'VALID' 
+    AND time >= now() - INTERVAL 7 DAY
+  ```
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="array" required>
+  Array of verification rows returned by the query. Fields vary based on the SQL SELECT clause. Can include any combination of fields like time, outcome, count, key_id, etc.
+  
+  Example:
+  ```json
+  [
+    {
+      "outcome": "VALID",
+      "count": 1234,
+      "time": 1696118400000
+    },
+    {
+      "outcome": "RATE_LIMITED",
+      "count": 56,
+      "time": 1696118400000
+    }
+  ]
+  ```
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/analytics.getVerifications \
+  -H "Authorization: Bearer <your-root-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "SELECT COUNT(*) as total FROM key_verifications_v1 WHERE outcome = '"'"'VALID'"'"' AND time >= now() - INTERVAL 7 DAY"
+  }'
+```
+
+```json Response
+{
+  "meta": {
+    "requestId": "req_01H9TQPP77V5E48E9SH0BG0ZQX"
+  },
+  "data": [
+    {
+      "total": 45678
+    }
+  ]
+}
+```
+
+### Common Query Examples
+
+**Count verifications by outcome**
+```sql
+SELECT outcome, COUNT(*) as count
+FROM key_verifications_v1
+WHERE time >= now() - INTERVAL 24 HOUR
+GROUP BY outcome
+```
+
+**Get top keys by usage**
+```sql
+SELECT key_id, COUNT(*) as verifications
+FROM key_verifications_v1
+WHERE time >= now() - INTERVAL 7 DAY
+GROUP BY key_id
+ORDER BY verifications DESC
+LIMIT 10
+```
+
+**Track hourly verification rates**
+```sql
+SELECCT 
+  toStartOfHour(time) as hour,
+  COUNT(*) as total_verifications
+FROM key_verifications_v1
+WHERE time >= now() - INTERVAL 24 HOUR
+GROUP BY hour
+ORDER BY hour
+```
+
+### Error Codes
+
+- `400` - Bad request (invalid SQL query or blocked operation)
+- `401` - Unauthorized (missing or invalid authentication)
+- `403` - Forbidden (insufficient permissions)
+- `404` - Not found (referenced API or identity not found)
+- `422` - Unprocessable entity (query exceeds resource limits: timeout, memory, rows scanned, or result size)
+- `429` - Too many requests (query quota exceeded)
+- `500` - Internal server error (query execution failed)
+- `503` - Service unavailable (connection to the database failed)
+
+### Query Limits
+
+To ensure system stability and fair resource usage, queries are subject to the following limits:
+
+- **Execution timeout**: Queries must complete within a reasonable time frame
+- **Memory usage**: Limited memory available per query
+- **Rows scanned**: Maximum number of rows that can be scanned
+- **Result size**: Maximum size of the result set
+
+If your query exceeds these limits, you'll receive a 422 error. Consider:
+- Narrowing the time range
+- Adding more specific WHERE clauses
+- Reducing the number of columns selected
+- Using aggregation to reduce result size

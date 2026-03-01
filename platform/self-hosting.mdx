@@ -1,0 +1,900 @@
+---
+title: "Self-Hosting"
+description: "Complete guide to self-hosting Unkey in your own infrastructure with Kubernetes or Docker"
+---
+
+Unkey can be self-hosted in your own infrastructure, giving you complete control over data, deployment, and scaling. This guide covers requirements, installation, and configuration for running Unkey on-premises or in your cloud environment.
+
+## Prerequisites
+
+Before installing Unkey, ensure you have the following requirements:
+
+### Infrastructure Requirements
+
+<Tabs>
+  <Tab title="Kubernetes">
+    **Minimum Requirements:**
+    - Kubernetes 1.28 or later
+    - 8 CPU cores and 16GB RAM across nodes
+    - 100GB persistent storage
+    - LoadBalancer support (for external access)
+    - Container runtime: containerd or Docker
+
+    **Recommended for Production:**
+    - Multi-zone cluster (3+ availability zones)
+    - 16+ CPU cores and 32GB+ RAM
+    - 500GB persistent storage with backup
+    - Monitoring stack (Prometheus, Grafana)
+
+    **Optional but Recommended:**
+    - cert-manager (for automatic TLS certificates)
+    - External Secrets Operator (for secret management)
+    - gVisor runtime (for workload isolation)
+    - Cilium CNI (for network policies)
+  </Tab>
+
+  <Tab title="Docker Compose">
+    **Minimum Requirements:**
+    - Docker Engine 24.0+ with Compose v2
+    - 4 CPU cores and 8GB RAM
+    - 50GB disk space
+    - Linux host (Ubuntu 22.04+ or similar)
+
+    **Recommended:**
+    - 8 CPU cores and 16GB RAM
+    - 100GB disk space
+    - Docker Swarm mode (for multi-node)
+
+    <Warning>
+      Docker Compose is suitable for development and small production deployments. For large-scale production use, Kubernetes is recommended.
+    </Warning>
+  </Tab>
+</Tabs>
+
+### External Dependencies
+
+Unkey requires the following external services:
+
+<AccordionGroup>
+  <Accordion title="MySQL 8.0+" icon="database">
+    **Purpose**: Primary data storage for keys, APIs, identities, permissions
+
+    **Requirements:**
+    - MySQL 8.0 or later
+    - InnoDB storage engine
+    - UTF-8 character set
+    - Primary/replica configuration recommended
+    - `max_connections=1000` or higher
+
+    **Managed Options:**
+    - AWS RDS MySQL
+    - Google Cloud SQL
+    - Azure Database for MySQL
+    - PlanetScale (MySQL-compatible)
+  </Accordion>
+
+  <Accordion title="Redis 7.0+ (or Dragonfly)" icon="bolt">
+    **Purpose**: Cache and rate limiting counters
+
+    **Requirements:**
+    - Redis 7.0+ or Dragonfly 1.0+
+    - No persistence required (cache only)
+    - Cluster or Sentinel mode for HA
+
+    **Managed Options:**
+    - AWS ElastiCache Redis
+    - Google Cloud Memorystore
+    - Azure Cache for Redis
+    - Upstash (serverless Redis)
+  </Accordion>
+
+  <Accordion title="S3-Compatible Object Storage" icon="box">
+    **Purpose**: Vault encryption key storage
+
+    **Requirements:**
+    - S3-compatible API
+    - Versioning enabled
+    - Bucket with read/write access
+
+    **Compatible Services:**
+    - AWS S3
+    - MinIO (self-hosted)
+    - Google Cloud Storage (S3 compatibility mode)
+    - DigitalOcean Spaces
+    - Cloudflare R2
+  </Accordion>
+
+  <Accordion title="ClickHouse 23.0+ (Optional)" icon="chart-simple">
+    **Purpose**: Analytics and verification event storage
+
+    **Requirements:**
+    - ClickHouse 23.0 or later
+    - Optional but recommended for production
+    - If not configured, analytics writes are disabled
+
+    **Managed Options:**
+    - ClickHouse Cloud
+    - AWS-hosted ClickHouse
+    - Self-hosted cluster
+  </Accordion>
+
+  <Accordion title="Restate (Optional)" icon="rotate">
+    **Purpose**: Workflow orchestration for control plane
+
+    **Requirements:**
+    - Restate 1.6 or later
+    - Required only for control plane workflows
+    - Not needed for API-only deployments
+
+    **Options:**
+    - Restate Cloud (managed)
+    - Self-hosted Restate server
+  </Accordion>
+</AccordionGroup>
+
+## Installation Methods
+
+### Docker Compose (Development)
+
+Quickest way to get started for development or testing:
+
+<Steps>
+  <Step title="Clone Repository">
+    ```bash
+    git clone https://github.com/unkeyed/unkey.git
+    cd unkey
+    ```
+  </Step>
+
+  <Step title="Configure Environment">
+    Create configuration files in `dev/config/`:
+
+    ```bash
+    # Generate secure tokens
+    export VAULT_TOKEN=$(openssl rand -hex 32)
+    export CTRL_TOKEN=$(openssl rand -hex 32)
+    export ENCRYPTION_KEY=$(openssl rand -hex 32)
+    ```
+
+    See [Configuration](#configuration) section below for detailed settings.
+  </Step>
+
+  <Step title="Start Services">
+    ```bash
+    cd dev
+    docker compose up -d
+    ```
+
+    This starts all required services:
+    - MySQL (port 3306)
+    - Redis (port 6379)
+    - MinIO/S3 (port 3902)
+    - ClickHouse (port 8123)
+    - Vault (port 8060)
+    - API Service (port 7070)
+    - Control API (port 7091)
+    - Dashboard (port 3000)
+  </Step>
+
+  <Step title="Verify Installation">
+    ```bash
+    # Check service health
+    curl http://localhost:7070/health/live
+    curl http://localhost:8060/health/live
+    
+    # Access dashboard
+    open http://localhost:3000
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  The Docker Compose setup includes all dependencies and is pre-configured for local development. See `dev/docker-compose.yaml` for the complete stack.
+</Note>
+
+### Kubernetes with Helm (Production)
+
+For production deployments, use Helm charts:
+
+<Steps>
+  <Step title="Prerequisites">
+    Install required tools:
+    ```bash
+    # Install Helm
+    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    
+    # Install kubectl
+    # Follow: https://kubernetes.io/docs/tasks/tools/
+    
+    # Optional: Install cert-manager
+    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+    
+    # Optional: Install External Secrets Operator
+    helm repo add external-secrets https://charts.external-secrets.io
+    helm install external-secrets external-secrets/external-secrets -n external-secrets-system --create-namespace
+    ```
+  </Step>
+
+  <Step title="Prepare Configuration">
+    Each service requires configuration and secrets. Helm charts are located in the source repository:
+
+    ```bash
+    git clone https://github.com/unkeyed/unkey.git
+    cd unkey/infra/infra/eks-cluster/helm-chart
+    ```
+
+    Available charts:
+    - `api/` - API service
+    - `frontline/` - Edge ingress
+    - `sentinel/` - Environment gateway
+    - `vault/` - Encryption service
+    - `krane/` - Kubernetes control agent
+    - `control-api/` - Control plane API
+    - `control-worker/` - Control plane worker
+    - `preflight/` - Admission webhook
+  </Step>
+
+  <Step title="Configure Secrets">
+    Create Kubernetes secrets or configure External Secrets:
+
+    ```bash
+    # Generate tokens
+    export VAULT_TOKEN=$(openssl rand -hex 32)
+    export CTRL_TOKEN=$(openssl rand -hex 32)
+    export ENCRYPTION_KEY=$(openssl rand -hex 32)
+    
+    # Create namespace
+    kubectl create namespace unkey
+    
+    # Create secrets (example for API service)
+    kubectl create secret generic unkey-api -n unkey \
+      --from-literal=UNKEY_DATABASE_PRIMARY='user:pass@tcp(mysql:3306)/unkey' \
+      --from-literal=UNKEY_CLICKHOUSE_URL='clickhouse://default:password@clickhouse:9000' \
+      --from-literal=UNKEY_VAULT_TOKEN="$VAULT_TOKEN" \
+      --from-literal=UNKEY_CTRL_TOKEN="$CTRL_TOKEN"
+    ```
+
+    See [Configuration](#configuration) for all required secrets per service.
+  </Step>
+
+  <Step title="Install Core Services">
+    Install services in order:
+
+    ```bash
+    # 1. Install Vault (required by other services)
+    helm install vault ./vault \
+      --namespace unkey \
+      --values vault/values.yaml
+    
+    # 2. Install API service
+    helm install api ./api \
+      --namespace unkey \
+      --values api/values.yaml
+    
+    # 3. Install Sentinel (if deploying environments)
+    helm install sentinel ./sentinel \
+      --namespace unkey \
+      --values sentinel/values.yaml
+    
+    # 4. Install Frontline (if exposing to internet)
+    helm install frontline ./frontline \
+      --namespace unkey \
+      --values frontline/values.yaml
+    ```
+  </Step>
+
+  <Step title="Verify Deployment">
+    ```bash
+    # Check pod status
+    kubectl get pods -n unkey
+    
+    # Check service endpoints
+    kubectl get svc -n unkey
+    
+    # Test health endpoints
+    kubectl port-forward -n unkey svc/api 7070:7070 &
+    curl http://localhost:7070/health/live
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Production deployments should use External Secrets Operator or a similar solution to manage secrets securely. Never commit secrets to values.yaml files.
+</Warning>
+
+## Configuration
+
+Each Unkey service is configured via a TOML file and environment variables. Configuration files are typically mounted at `/etc/unkey/<service>.toml`.
+
+### API Service Configuration
+
+<Tabs>
+  <Tab title="api.toml">
+    ```toml
+    # HTTP server configuration
+    http_port = 7070
+    region = "us-east-1"
+    
+    # Redis for caching and rate limiting
+    redis_url = "redis://redis:6379"
+    
+    # Database configuration
+    [database]
+    primary = "user:password@tcp(mysql:3306)/unkey?parseTime=true"
+    replica = "user:password@tcp(mysql-replica:3306)/unkey?parseTime=true"
+    
+    # ClickHouse for analytics (optional)
+    [clickhouse]
+    url = "clickhouse://default:password@clickhouse:9000?secure=false"
+    analytics_url = "http://clickhouse:8123/default"
+    
+    # Vault for encryption
+    [vault]
+    url = "http://vault:8060"
+    token = "${UNKEY_VAULT_TOKEN}"  # From secret
+    
+    # Control plane integration
+    [control]
+    url = "http://ctrl-api:7091"
+    token = "${UNKEY_CTRL_TOKEN}"  # From secret
+    
+    # Profiling (authenticated)
+    [pprof]
+    username = "admin"
+    password = "${UNKEY_PPROF_PASSWORD}"  # From secret
+    
+    # Gossip cluster (optional)
+    [gossip]
+    secret_key = "${UNKEY_GOSSIP_SECRET_KEY}"  # From secret
+    bind_port = 7946
+    advertise_addr = "${POD_IP}"  # From downward API
+    ```
+  </Tab>
+
+  <Tab title="Required Secrets">
+    Create these secrets in your secret management system:
+
+    | Secret Key | Description | Example |
+    |------------|-------------|----------|
+    | `UNKEY_DATABASE_PRIMARY` | Primary MySQL connection string | `user:pass@tcp(host:3306)/db` |
+    | `UNKEY_DATABASE_REPLICA` | Replica MySQL connection string | `user:pass@tcp(host:3306)/db` |
+    | `UNKEY_CLICKHOUSE_URL` | ClickHouse connection URL | `clickhouse://user:pass@host:9000` |
+    | `UNKEY_CLICKHOUSE_ANALYTICS_URL` | ClickHouse HTTP URL | `http://host:8123/database` |
+    | `UNKEY_VAULT_TOKEN` | Vault authentication token | Random 32-byte hex string |
+    | `UNKEY_CTRL_TOKEN` | Control plane auth token | Random 32-byte hex string |
+    | `UNKEY_PPROF_PASSWORD` | pprof endpoint password | Strong password |
+    | `UNKEY_GOSSIP_SECRET_KEY` | Gossip encryption key (optional) | Random 32-byte hex string |
+
+    Generate secure tokens:
+    ```bash
+    openssl rand -hex 32
+    ```
+  </Tab>
+
+  <Tab title="Environment Variables">
+    Additional configuration via environment variables:
+
+    ```yaml
+    # Kubernetes Pod spec example
+    env:
+      - name: UNKEY_REGION
+        value: "us-east-1"
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: "http://otel-collector:4317"
+      - name: OTEL_EXPORTER_OTLP_HEADERS
+        value: "x-api-key=your-api-key"
+      - name: POD_IP
+        valueFrom:
+          fieldRef:
+            fieldPath: status.podIP
+      - name: POD_NAMESPACE
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.namespace
+    ```
+  </Tab>
+</Tabs>
+
+### Vault Service Configuration
+
+<Tabs>
+  <Tab title="vault.toml">
+    ```toml
+    # HTTP server configuration
+    http_port = 8060
+    
+    # S3-compatible object storage
+    [s3]
+    url = "http://s3.amazonaws.com"
+    bucket = "unkey-vault-keys"
+    access_key_id = "${UNKEY_S3_ACCESS_KEY_ID}"
+    access_key_secret = "${UNKEY_S3_ACCESS_KEY_SECRET}"
+    region = "us-east-1"
+    
+    # Encryption keys
+    [encryption]
+    master_key = "${UNKEY_ENCRYPTION_MASTER_KEY}"
+    previous_master_key = "${UNKEY_ENCRYPTION_PREVIOUS_MASTER_KEY}"  # Optional
+    
+    # Authentication
+    [auth]
+    token = "${UNKEY_VAULT_TOKEN}"
+    ```
+  </Tab>
+
+  <Tab title="Required Secrets">
+    | Secret Key | Description |
+    |------------|-------------|
+    | `UNKEY_VAULT_TOKEN` | Authentication token for Vault RPC |
+    | `UNKEY_ENCRYPTION_MASTER_KEY` | Current master key (64 hex chars) |
+    | `UNKEY_ENCRYPTION_PREVIOUS_MASTER_KEY` | Previous master key for rotation |
+    | `UNKEY_S3_URL` | S3 endpoint URL |
+    | `UNKEY_S3_BUCKET` | S3 bucket name |
+    | `UNKEY_S3_ACCESS_KEY_ID` | S3 access key ID |
+    | `UNKEY_S3_ACCESS_KEY_SECRET` | S3 secret access key |
+
+    Generate master key:
+    ```bash
+    openssl rand -hex 32  # 64 character hex string
+    ```
+  </Tab>
+</Tabs>
+
+### Control Plane Configuration
+
+<Tabs>
+  <Tab title="ctrl-api.toml">
+    ```toml
+    http_port = 7091
+    region = "us-east-1"
+    
+    [database]
+    primary = "${UNKEY_DATABASE_PRIMARY}"
+    
+    [restate]
+    url = "http://restate:8080"
+    api_key = "${UNKEY_RESTATE_API_KEY}"
+    
+    [auth]
+    token = "${UNKEY_AUTH_TOKEN}"
+    
+    # GitHub App integration (optional)
+    [github]
+    app_id = "${UNKEY_GITHUB_APP_ID}"
+    private_key_pem = "${UNKEY_GITHUB_PRIVATE_KEY_PEM}"
+    webhook_secret = "${UNKEY_GITHUB_APP_WEBHOOK_SECRET}"
+    ```
+  </Tab>
+
+  <Tab title="ctrl-worker.toml">
+    ```toml
+    restate_ingress_port = 9080
+    metrics_port = 9090
+    region = "us-east-1"
+    
+    [database]
+    primary = "${UNKEY_DATABASE_PRIMARY}"
+    
+    [clickhouse]
+    url = "${UNKEY_CLICKHOUSE_URL}"
+    admin_url = "${UNKEY_CLICKHOUSE_ADMIN_URL}"
+    
+    [vault]
+    url = "http://vault:8060"
+    token = "${UNKEY_VAULT_TOKEN}"
+    
+    # Container registry
+    [registry]
+    url = "${UNKEY_REGISTRY_URL}"
+    username = "${UNKEY_REGISTRY_USERNAME}"
+    password = "${UNKEY_REGISTRY_PASSWORD}"
+    
+    # ACME for certificate management
+    [acme]
+    route53_access_key_id = "${UNKEY_ACME_ROUTE53_ACCESS_KEY_ID}"
+    route53_secret_access_key = "${UNKEY_ACME_ROUTE53_SECRET_ACCESS_KEY}"
+    route53_region = "${UNKEY_ACME_ROUTE53_REGION}"
+    ```
+  </Tab>
+</Tabs>
+
+### Minimal API-Only Deployment
+
+For a minimal setup without control plane features:
+
+<AccordionGroup>
+  <Accordion title="Required Services">
+    **Core Services:**
+    - API Service
+    - Vault Service
+    
+    **Dependencies:**
+    - MySQL
+    - Redis
+    - S3-compatible storage
+    - ClickHouse (optional)
+  </Accordion>
+
+  <Accordion title="Docker Compose Minimal">
+    ```yaml
+    services:
+      mysql:
+        image: mysql:8.0
+        environment:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: unkey
+        ports:
+          - "3306:3306"
+
+      redis:
+        image: redis:8.0
+        ports:
+          - "6379:6379"
+
+      s3:
+        image: minio/minio:latest
+        command: server /data --console-address ":9001"
+        environment:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - "9000:9000"
+
+      vault:
+        image: ghcr.io/unkeyed/unkey:latest
+        command: ["run", "vault", "--config", "/etc/unkey/vault.toml"]
+        volumes:
+          - ./vault.toml:/etc/unkey/vault.toml
+        environment:
+          UNKEY_VAULT_TOKEN: "vault-token-change-me"
+          UNKEY_ENCRYPTION_MASTER_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          UNKEY_S3_URL: "http://s3:9000"
+          UNKEY_S3_BUCKET: "vault-keys"
+          UNKEY_S3_ACCESS_KEY_ID: "minioadmin"
+          UNKEY_S3_ACCESS_KEY_SECRET: "minioadmin"
+        ports:
+          - "8060:8060"
+
+      api:
+        image: ghcr.io/unkeyed/unkey:latest
+        command: ["run", "api", "--config", "/etc/unkey/api.toml"]
+        volumes:
+          - ./api.toml:/etc/unkey/api.toml
+        environment:
+          UNKEY_DATABASE_PRIMARY: "root:root@tcp(mysql:3306)/unkey?parseTime=true"
+          UNKEY_VAULT_TOKEN: "vault-token-change-me"
+        ports:
+          - "7070:7070"
+        depends_on:
+          - mysql
+          - redis
+          - vault
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Database Setup
+
+### Schema Migration
+
+Unkey uses database migrations to set up the schema:
+
+```bash
+# Using the Unkey binary
+./unkey migrate --database "user:pass@tcp(host:3306)/unkey"
+
+# Or using Docker
+docker run --rm ghcr.io/unkeyed/unkey:latest \
+  migrate --database "user:pass@tcp(mysql:3306)/unkey"
+```
+
+<Note>
+  Migrations are idempotent and safe to run multiple times. They automatically detect the current schema version and apply only necessary changes.
+</Note>
+
+### Creating Initial Data
+
+After schema setup, create an initial workspace and API key:
+
+```bash
+# Connect to MySQL
+mysql -h localhost -u unkey -p unkey
+
+# Create workspace (example)
+INSERT INTO workspaces (id, name, slug, created_at) 
+VALUES ('ws_123', 'My Workspace', 'my-workspace', NOW());
+
+# Create API (example)
+INSERT INTO apis (id, workspace_id, name, created_at) 
+VALUES ('api_123', 'ws_123', 'My API', NOW());
+
+# Create root key (example)
+INSERT INTO keys (id, api_id, key_hash, created_at) 
+VALUES ('key_123', 'api_123', SHA2('my_root_key', 256), NOW());
+```
+
+<Warning>
+  For production use, generate secure random IDs and use the API or dashboard to create resources instead of direct database manipulation.
+</Warning>
+
+## Verification
+
+After installation, verify your deployment:
+
+### Health Checks
+
+```bash
+# Check all service health
+curl http://api:7070/health/live
+curl http://api:7070/health/ready
+curl http://vault:8060/health/live
+
+# Check with authentication
+curl http://api:7070/v1/keys.whoami \
+  -H "Authorization: Bearer your-api-key"
+```
+
+### API Verification
+
+```bash
+# Create a test key
+curl -X POST http://api:7070/v1/keys.createKey \
+  -H "Authorization: Bearer your-root-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiId": "api_123",
+    "name": "test-key"
+  }'
+
+# Verify the key
+curl -X POST http://api:7070/v1/keys.verifyKey \
+  -H "Content-Type: application/json" \
+  -d '{
+    "key": "the-key-from-above"
+  }'
+```
+
+### Monitoring
+
+Check metrics endpoints:
+
+```bash
+# Prometheus metrics
+curl http://api:2112/metrics
+curl http://vault:8060/metrics
+
+# Sample metrics to verify:
+# - unkey_http_requests_total
+# - unkey_key_verifications_total
+# - unkey_cache_hits_total
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Service Won't Start">
+    **Check logs:**
+    ```bash
+    # Docker Compose
+    docker compose logs api
+    
+    # Kubernetes
+    kubectl logs -n unkey deployment/api
+    ```
+
+    **Common issues:**
+    - Missing required secrets → Check secret configuration
+    - Database connection failed → Verify MySQL is accessible
+    - Port already in use → Change port in configuration
+    - Invalid TOML syntax → Validate configuration file
+  </Accordion>
+
+  <Accordion title="Database Connection Errors">
+    **Verify connectivity:**
+    ```bash
+    # Test MySQL connection
+    mysql -h mysql-host -u username -p database
+    
+    # Test from container
+    docker exec -it api-container \
+      /unkey healthcheck mysql://user:pass@mysql:3306/unkey
+    ```
+
+    **Check permissions:**
+    ```sql
+    SHOW GRANTS FOR 'unkey'@'%';
+    -- Should have: SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX
+    ```
+  </Accordion>
+
+  <Accordion title="Vault Encryption Errors">
+    **Verify Vault health:**
+    ```bash
+    curl http://vault:8060/health/live
+    ```
+
+    **Test S3 connectivity:**
+    ```bash
+    # Using AWS CLI
+    aws s3 ls s3://your-bucket --endpoint-url http://s3:9000
+    ```
+
+    **Common issues:**
+    - Invalid master key (must be 64 hex characters)
+    - S3 bucket doesn't exist or wrong permissions
+    - S3 endpoint not reachable from Vault pod
+  </Accordion>
+
+  <Accordion title="High Latency">
+    **Check cache hit rates:**
+    ```bash
+    # View Prometheus metrics
+    curl http://api:2112/metrics | grep cache_hits
+    ```
+
+    **Verify Redis connection:**
+    ```bash
+    redis-cli -h redis-host ping
+    redis-cli -h redis-host info stats
+    ```
+
+    **Potential causes:**
+    - Redis not configured or unreachable
+    - Database replica lag (check replication status)
+    - Network latency between services
+    - Insufficient resources (CPU/memory)
+  </Accordion>
+
+  <Accordion title="Authentication Failures">
+    **Verify tokens match:**
+    - UNKEY_VAULT_TOKEN must match between API and Vault
+    - UNKEY_CTRL_TOKEN must match between API and Control API
+
+    **Check token format:**
+    ```bash
+    # Token should be hex string
+    echo $UNKEY_VAULT_TOKEN | wc -c  # Should be 65 (64 + newline)
+    ```
+
+    **Test authentication:**
+    ```bash
+    # Should return 401 without token
+    curl http://api:7070/v1/keys.whoami
+    
+    # Should return 200 with valid token
+    curl http://api:7070/v1/keys.whoami \
+      -H "Authorization: Bearer your-key"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Upgrading
+
+To upgrade your Unkey deployment:
+
+<Steps>
+  <Step title="Backup Database">
+    ```bash
+    # MySQL backup
+    mysqldump -h mysql-host -u root -p unkey > unkey-backup-$(date +%Y%m%d).sql
+    
+    # S3 backup (Vault keys)
+    aws s3 sync s3://vault-bucket s3://vault-bucket-backup-$(date +%Y%m%d)
+    ```
+  </Step>
+
+  <Step title="Review Changelog">
+    Check the release notes for breaking changes:
+    ```bash
+    # View latest releases
+    curl https://api.github.com/repos/unkeyed/unkey/releases/latest
+    ```
+  </Step>
+
+  <Step title="Update Images">
+    **Docker Compose:**
+    ```bash
+    # Update image tags in docker-compose.yaml
+    # Then pull and restart
+    docker compose pull
+    docker compose up -d
+    ```
+
+    **Kubernetes:**
+    ```bash
+    # Update image tag in values.yaml
+    helm upgrade api ./api \
+      --namespace unkey \
+      --values api/values.yaml
+    ```
+  </Step>
+
+  <Step title="Run Migrations">
+    ```bash
+    # Migrations run automatically on startup
+    # Or run manually
+    ./unkey migrate --database "connection-string"
+    ```
+  </Step>
+
+  <Step title="Verify Upgrade">
+    ```bash
+    # Check version
+    curl http://api:7070/health/live
+    
+    # Verify functionality
+    curl http://api:7070/v1/keys.verifyKey \
+      -X POST \
+      -H "Content-Type: application/json" \
+      -d '{"key": "test-key"}'
+    ```
+  </Step>
+</Steps>
+
+## Security Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Secret Management" icon="key">
+    - Use External Secrets Operator or HashiCorp Vault
+    - Rotate tokens every 90 days
+    - Never commit secrets to version control
+    - Use strong random tokens (32+ bytes)
+  </Card>
+  <Card title="Network Security" icon="shield">
+    - Use network policies to restrict pod-to-pod traffic
+    - Enable TLS for all external connections
+    - Use private networks for database access
+    - Implement IP allowlisting where possible
+  </Card>
+  <Card title="Database Security" icon="database">
+    - Use strong passwords and rotate regularly
+    - Enable encryption at rest and in transit
+    - Restrict database user permissions
+    - Enable audit logging
+  </Card>
+  <Card title="Access Control" icon="lock">
+    - Use RBAC for Kubernetes access
+    - Implement least-privilege service accounts
+    - Enable audit logging for all API calls
+    - Regular security audits
+  </Card>
+</CardGroup>
+
+## Production Checklist
+
+Before going to production:
+
+- [ ] Multi-zone Kubernetes cluster configured
+- [ ] MySQL primary/replica setup with automated backups
+- [ ] Redis in HA mode (Sentinel or Cluster)
+- [ ] S3 bucket with versioning and backup
+- [ ] All secrets managed via External Secrets Operator
+- [ ] TLS certificates configured (cert-manager)
+- [ ] Monitoring stack deployed (Prometheus/Grafana)
+- [ ] Alerting configured for critical issues
+- [ ] Resource requests/limits set on all pods
+- [ ] HPA (Horizontal Pod Autoscaler) configured
+- [ ] PodDisruptionBudgets configured
+- [ ] Network policies applied
+- [ ] Backup and restore procedures tested
+- [ ] Disaster recovery plan documented
+- [ ] Load testing completed
+
+## Getting Help
+
+If you encounter issues:
+
+1. **Check Documentation**: Review [Architecture](/platform/architecture) and [Deployments](/platform/deployments)
+2. **Search Issues**: Look for similar issues on [GitHub](https://github.com/unkeyed/unkey/issues)
+3. **Community Support**: Join the Discord community
+4. **Create Issue**: Open a detailed issue on GitHub with:
+   - Unkey version
+   - Deployment method (Docker/Kubernetes)
+   - Error logs
+   - Configuration (sanitized, no secrets)
+
+## Related Documentation
+
+- [Architecture Overview](/platform/architecture) - Understand system architecture
+- [Deployments](/platform/deployments) - Regional deployment model
+- [API Reference](/api-reference) - API endpoint documentation

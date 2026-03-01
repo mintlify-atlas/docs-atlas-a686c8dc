@@ -1,0 +1,519 @@
+---
+title: Authorization with RBAC
+description: Implement role-based access control with permissions verification for fine-grained API access
+---
+
+Role-Based Access Control (RBAC) lets you define what each API key is allowed to do. Instead of treating all keys equally, you can grant specific permissions based on roles, enabling fine-grained authorization for your API.
+
+## How RBAC works in Unkey
+
+Unkey's authorization system has three components:
+
+<Steps>
+  <Step title="Permissions">
+    Individual capabilities like `documents.read` or `users.delete`. These represent atomic actions in your system.
+  </Step>
+  <Step title="Roles">
+    Collections of permissions. A role like `editor` might include `documents.read`, `documents.write`, and `documents.delete`.
+  </Step>
+  <Step title="Keys">
+    API keys are assigned one or more roles. When a key is verified, you can check if it has the required permissions.
+  </Step>
+</Steps>
+
+<Note>
+**Keys inherit permissions from all assigned roles.** A key with both `editor` and `viewer` roles will have permissions from both.
+</Note>
+
+## Setting up authorization
+
+### Define your permission model
+
+Start by mapping out what actions your API supports. Use a hierarchical naming convention:
+
+```text
+resource.action
+
+Examples:
+- documents.read
+- documents.write
+- documents.delete
+- users.create
+- users.delete
+- billing.view
+- billing.manage
+```
+
+For complex systems, use deeper hierarchies:
+
+```text
+domain.dns.create_record
+domain.dns.update_record
+domain.dns.delete_record
+domain.create_domain
+domain.delete_domain
+```
+
+### Create permissions
+
+Create permissions via the dashboard or API:
+
+<Tabs>
+  <Tab title="Dashboard">
+    1. Navigate to **Authorization** → **Permissions** in your [Unkey dashboard](https://app.unkey.com)
+    2. Click **Create New Permission**
+    3. Enter a **name** (human-readable) and **slug** (your permission identifier)
+    4. Add an optional description
+    5. Click **Create new permission**
+  </Tab>
+  
+  <Tab title="API">
+    ```bash
+    curl -X POST https://api.unkey.com/v2/permissions.createPermission \
+      -H "Authorization: Bearer $UNKEY_ROOT_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "Read Documents",
+        "slug": "documents.read",
+        "description": "View document contents and metadata"
+      }'
+    ```
+  </Tab>
+</Tabs>
+
+### Create roles
+
+Group permissions into logical roles:
+
+<Tabs>
+  <Tab title="Dashboard">
+    1. Navigate to **Authorization** → **Roles**
+    2. Click **Create New Role**
+    3. Enter a unique role name (e.g., `admin`, `editor`, `viewer`)
+    4. Optionally add a description
+    5. Select permissions to attach
+    6. Click **Create new role**
+  </Tab>
+  
+  <Tab title="API">
+    ```bash
+    curl -X POST https://api.unkey.com/v2/roles.createRole \
+      -H "Authorization: Bearer $UNKEY_ROOT_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "editor",
+        "description": "Can create and modify documents",
+        "permissions": ["documents.read", "documents.write", "documents.delete"]
+      }'
+    ```
+  </Tab>
+</Tabs>
+
+### Attach roles to keys
+
+When creating or updating keys, assign one or more roles:
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.createKey \
+  -H "Authorization: Bearer $UNKEY_ROOT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiId": "api_...",
+    "roles": ["editor", "viewer"],
+    "name": "Production API Key"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY });
+
+try {
+  const { meta, data } = await unkey.keys.create({
+    apiId: "api_...",
+    roles: ["editor", "viewer"],
+    name: "Production API Key",
+  });
+
+  console.log(data.key); // Give this to your user
+} catch (error) {
+  console.error(error);
+  throw error;
+}
+```
+
+</CodeGroup>
+
+## Verifying permissions
+
+During key verification, check if the key has required permissions. If not, verification fails with `code: INSUFFICIENT_PERMISSIONS`.
+
+### Single permission check
+
+<CodeGroup>
+
+```typescript TypeScript
+import { verifyKey } from "@unkey/api";
+
+try {
+  const { meta, data } = await verifyKey({
+    key: request.headers.get("authorization")?.replace("Bearer ", ""),
+    permissions: "documents.read",
+  });
+
+  if (!data.valid) {
+    if (data.code === "INSUFFICIENT_PERMISSIONS") {
+      return Response.json(
+        { error: "You don't have permission to read documents" },
+        { status: 403 }
+      );
+    }
+    return Response.json({ error: data.code }, { status: 401 });
+  }
+
+  // Permission granted - continue with your logic
+  const documents = await db.documents.findMany();
+  return Response.json({ documents });
+} catch (error) {
+  console.error(error);
+  return Response.json({ error: "Internal error" }, { status: 500 });
+}
+```
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.verifyKey \
+  -H "Content-Type: application/json" \
+  -d '{
+    "key": "sk_...",
+    "permissions": "documents.read"
+  }'
+```
+
+</CodeGroup>
+
+### Complex permission queries
+
+Unkey supports logical operators for sophisticated checks:
+
+<AccordionGroup>
+  <Accordion title="AND - Require multiple permissions">
+    ```typescript
+    const { meta, data } = await verifyKey({
+      key: "sk_...",
+      permissions: "documents.read AND documents.write",
+    });
+    ```
+    
+    Key must have **both** permissions.
+  </Accordion>
+  
+  <Accordion title="OR - Require any permission">
+    ```typescript
+    const { meta, data } = await verifyKey({
+      key: "sk_...",
+      permissions: "admin OR editor",
+    });
+    ```
+    
+    Key needs **at least one** of the specified permissions.
+  </Accordion>
+  
+  <Accordion title="Complex expressions with parentheses">
+    ```typescript
+    const { meta, data } = await verifyKey({
+      key: "sk_...",
+      permissions: "admin OR (documents.delete AND documents.write)",
+    });
+    ```
+    
+    Key must be an admin **OR** have both delete and write permissions.
+  </Accordion>
+</AccordionGroup>
+
+### Wildcard permissions
+
+Use wildcards to grant broad access without listing individual permissions:
+
+```typescript
+// Key has: ["documents.*"]
+// This grants: documents.read, documents.write, documents.delete, etc.
+
+const { meta, data } = await verifyKey({
+  key: "sk_...",
+  permissions: "documents.read",  // ✅ Matches documents.*
+});
+```
+
+Common patterns:
+- `*` — All permissions (admin-level access)
+- `documents.*` — All document operations
+- `api.v1.*` — All v1 API endpoints
+- `tenant.*.read` — Read access to all tenant resources
+
+<Warning>
+Use `*` sparingly. It's better to create an `admin` role with explicit permissions than to use wildcard matching.
+</Warning>
+
+## Advanced patterns
+
+### Context-aware authorization
+
+Sometimes you need to check permissions **after** loading data from your database:
+
+```typescript
+try {
+  // Step 1: Verify the key and get its permissions
+  const { meta, data } = await verifyKey({
+    key: request.apiKey,
+  });
+
+  if (!data.valid) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const permissions = data.permissions ?? [];
+
+  // Step 2: Load the resource
+  const document = await db.documents.findUnique({
+    where: { id: documentId },
+  });
+
+  if (!document) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // Step 3: Check permissions based on ownership
+  const canDelete =
+    permissions.includes("admin") ||
+    (permissions.includes("documents.delete") &&
+      document.ownerId === data.identity?.externalId);
+
+  if (!canDelete) {
+    return Response.json(
+      { error: "You can only delete your own documents" },
+      { status: 403 }
+    );
+  }
+
+  // Permission granted
+  await db.documents.delete({ where: { id: documentId } });
+  return Response.json({ success: true });
+} catch (error) {
+  console.error(error);
+  return Response.json({ error: "Internal error" }, { status: 500 });
+}
+```
+
+### Permission hierarchies
+
+Design permissions to reflect resource hierarchies:
+
+```typescript
+// Organization structure:
+// org.members.invite
+// org.members.remove
+// org.billing.view
+// org.billing.manage
+// org.settings.update
+
+// Project-specific permissions:
+// project.deployments.create
+// project.deployments.rollback
+// project.env.read
+// project.env.write
+
+// Grant org-level admin:
+const { meta, data } = await unkey.keys.create({
+  apiId: "api_...",
+  roles: ["org.admin"],  // Has all org.* permissions
+});
+```
+
+### API endpoint protection
+
+Map HTTP routes to permissions:
+
+```typescript
+const permissionMap = {
+  "GET /api/documents": "documents.read",
+  "POST /api/documents": "documents.write",
+  "DELETE /api/documents/:id": "documents.delete",
+  "GET /api/users": "users.read",
+  "POST /api/users": "users.create",
+} as const;
+
+export async function middleware(request: Request) {
+  const route = `${request.method} ${new URL(request.url).pathname}`;
+  const requiredPermission = permissionMap[route];
+
+  if (!requiredPermission) {
+    return Response.json({ error: "Route not found" }, { status: 404 });
+  }
+
+  const apiKey = request.headers.get("authorization")?.replace("Bearer ", "");
+
+  try {
+    const { meta, data } = await verifyKey({
+      key: apiKey,
+      permissions: requiredPermission,
+    });
+
+    if (!data.valid) {
+      return Response.json({ error: data.code }, { status: 403 });
+    }
+
+    // Attach permissions to request for downstream use
+    request.headers.set("X-User-Permissions", JSON.stringify(data.permissions));
+    return null; // Continue to route handler
+  } catch (error) {
+    console.error(error);
+    return Response.json({ error: "Internal error" }, { status: 500 });
+  }
+}
+```
+
+## Real-world example: Domain management API
+
+Let's build a complete RBAC system for a domain management platform:
+
+<Steps>
+  <Step title="Define permissions">
+    ```text
+    domain.create_domain
+    domain.read_domain
+    domain.update_domain
+    domain.delete_domain
+    domain.dns.create_record
+    domain.dns.read_record
+    domain.dns.update_record
+    domain.dns.delete_record
+    ```
+  </Step>
+  
+  <Step title="Create roles">
+    **admin** — Full access to everything
+    - All permissions
+    
+    **dns.manager** — Can manage DNS records but not domains
+    - `domain.dns.create_record`
+    - `domain.dns.read_record`
+    - `domain.dns.update_record`
+    - `domain.dns.delete_record`
+    
+    **read-only** — View-only access
+    - `domain.read_domain`
+    - `domain.dns.read_record`
+  </Step>
+  
+  <Step title="Assign roles to keys">
+    ```typescript
+    // Admin user gets full access
+    await unkey.keys.create({
+      apiId: "api_...",
+      roles: ["admin"],
+      name: "Admin API Key",
+    });
+
+    // DNS manager for automated systems
+    await unkey.keys.create({
+      apiId: "api_...",
+      roles: ["dns.manager"],
+      name: "DNS Automation Key",
+    });
+
+    // Monitoring system gets read-only access
+    await unkey.keys.create({
+      apiId: "api_...",
+      roles: ["read-only"],
+      name: "Monitoring Key",
+    });
+    ```
+  </Step>
+  
+  <Step title="Verify in your API">
+    ```typescript
+    // DELETE /api/domains/:id/dns/:recordId
+    export async function DELETE(request: Request) {
+      const { meta, data } = await verifyKey({
+        key: request.apiKey,
+        permissions: "domain.dns.delete_record",
+      });
+
+      if (!data.valid) {
+        return Response.json({ error: data.code }, { status: 403 });
+      }
+
+      // Permission granted - delete the DNS record
+      await deleteDnsRecord(recordId);
+      return Response.json({ success: true });
+    }
+    ```
+  </Step>
+</Steps>
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="Use specific permissions" icon="crosshairs">
+    Define `users.delete` instead of `admin`. Granular permissions give you better audit trails and easier debugging.
+  </Card>
+  
+  <Card title="Check permissions server-side" icon="shield-halved">
+    Never rely on client-side checks. Always verify permissions in your API, even if the UI hides certain actions.
+  </Card>
+  
+  <Card title="Group with roles" icon="users">
+    Instead of attaching 15 permissions to every key, create roles and attach those. Easier to manage and update.
+  </Card>
+  
+  <Card title="Start broad, then narrow" icon="funnel">
+    Begin with a few roles (`admin`, `user`), then split them as your needs grow. Premature optimization leads to complexity.
+  </Card>
+</CardGroup>
+
+<Warning>
+**Don't commit files with sensitive permissions.** Avoid hardcoding permission checks in your codebase. Instead, fetch the permission requirements dynamically or store them in configuration.
+</Warning>
+
+## Response structure
+
+Successful verification with permissions:
+
+```json
+{
+  "meta": { "requestId": "req_..." },
+  "data": {
+    "valid": true,
+    "code": "VALID",
+    "keyId": "key_...",
+    "permissions": ["documents.read", "documents.write", "users.view"]
+  }
+}
+```
+
+Failed permission check:
+
+```json
+{
+  "meta": { "requestId": "req_..." },
+  "data": {
+    "valid": false,
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "keyId": "key_..."
+  }
+}
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Multi-tenant applications" icon="building" href="/advanced/multi-tenant">
+    Use identities to scope permissions per organization
+  </Card>
+  <Card title="Rate limit overrides" icon="gauge-high" href="/advanced/rate-limit-overrides">
+    Adjust rate limits based on user roles
+  </Card>
+</CardGroup>

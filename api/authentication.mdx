@@ -1,0 +1,213 @@
+---
+title: Authentication
+description: Authenticate API requests using root keys with Bearer token authentication
+---
+
+The Unkey API uses HTTP Bearer authentication with root keys. Root keys authorize access to management operations and control what resources and actions are available.
+
+## Root Keys
+
+Root keys are API credentials that authenticate your requests to the Unkey API. Unlike the API keys you create for your end users, root keys are used to manage your Unkey workspace programmatically.
+
+<Warning>
+  Root keys have powerful permissions. Keep them secure and never expose them in client-side code or public repositories.
+</Warning>
+
+### Creating a Root Key
+
+Create root keys from your Unkey dashboard:
+
+1. Navigate to **Settings** > **Root Keys**
+2. Click **Create New Root Key**
+3. Configure permissions for the key
+4. Copy and securely store the key - it won't be shown again
+
+## Authentication Format
+
+Include your root key in the `Authorization` header of each request using the Bearer authentication scheme:
+
+```bash
+Authorization: Bearer unkey_xxxxxxxxxxx
+```
+
+### Example Request
+
+<CodeGroup>
+
+```bash cURL
+curl https://api.unkey.com/v2/keys.getKey \
+  -H "Authorization: Bearer unkey_ABC123XYZ" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_123"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from '@unkey/api';
+
+const unkey = new Unkey({
+  rootKey: 'unkey_ABC123XYZ'
+});
+
+const result = await unkey.keys.get({
+  keyId: 'key_123'
+});
+```
+
+```python Python
+from unkey import Unkey
+
+unkey = Unkey(root_key="unkey_ABC123XYZ")
+
+result = unkey.keys.get(key_id="key_123")
+```
+
+```go Go
+import "github.com/unkeyed/unkey-go"
+
+client := unkey.NewClient("unkey_ABC123XYZ")
+
+result, err := client.Keys.Get(ctx, &unkey.GetKeyRequest{
+    KeyID: "key_123",
+})
+```
+
+</CodeGroup>
+
+## Permissions
+
+Root keys have specific permissions attached to them, controlling what operations they can perform. Permissions follow a hierarchical structure:
+
+```
+resource.resource_id.action
+```
+
+### Permission Patterns
+
+<ParamField path="resource" type="string" required>
+  The resource type (e.g., `api`, `key`, `identity`)
+</ParamField>
+
+<ParamField path="resource_id" type="string" required>
+  Specific resource ID or `*` for all resources of this type
+</ParamField>
+
+<ParamField path="action" type="string" required>
+  The action to perform (e.g., `create_key`, `read_api`, `verify_key`)
+</ParamField>
+
+### Common Permission Examples
+
+- `api.*.create_key` - Create keys in any API
+- `api.api_123.create_key` - Create keys only in API with ID `api_123`
+- `api.*.verify_key` - Verify keys in any API
+- `api.*.read_api` - Read information about any API
+
+<Tip>
+  Check individual endpoint documentation for the specific permissions required. Most endpoints list required permissions in their description.
+</Tip>
+
+## Security Best Practices
+
+Follow these guidelines to keep your root keys secure:
+
+### Store Keys Securely
+
+- Use environment variables or secure secret management services
+- Never hardcode keys in source code
+- Never commit keys to version control
+- Never expose keys in client-side code or public repositories
+
+### Use Minimal Permissions
+
+Create root keys with only the permissions needed for their specific use case:
+
+```typescript
+// Good: Specific permissions for verification service
+// Permissions: api.prod_api_id.verify_key
+
+// Bad: Overly broad permissions
+// Permissions: api.*.*
+```
+
+### Rotate Keys Regularly
+
+Establish a key rotation schedule:
+
+- Rotate keys after team member departures
+- Rotate keys if you suspect compromise
+- Consider periodic rotation (e.g., every 90 days)
+- Create new keys before revoking old ones to avoid downtime
+
+### Use Different Keys per Environment
+
+Create separate root keys for each environment:
+
+- Development environment: Limited permissions for testing
+- Staging environment: Production-like permissions
+- Production environment: Minimal required permissions
+
+### Monitor Key Usage
+
+Track root key activity through audit logs:
+
+- Review logs regularly for unexpected activity
+- Set up alerts for unusual patterns
+- Monitor failed authentication attempts
+- Track permission-denied events
+
+## Authentication Errors
+
+When authentication fails, you'll receive specific error responses:
+
+### 401 Unauthorized
+
+Returned when authentication credentials are missing or invalid:
+
+```json
+{
+  "meta": {
+    "requestId": "req_2c9a0jf23l4k567"
+  },
+  "error": {
+    "title": "Unauthorized",
+    "detail": "The provided token is invalid or has expired",
+    "status": 401,
+    "type": "https://unkey.com/docs/errors/unauthorized"
+  }
+}
+```
+
+**Common causes:**
+- No `Authorization` header provided
+- Invalid root key format
+- Expired or revoked root key
+- Malformed Bearer token
+
+### 403 Forbidden
+
+Returned when credentials are valid but lack sufficient permissions:
+
+```json
+{
+  "meta": {
+    "requestId": "req_2c9a0jf23l4k567"
+  },
+  "error": {
+    "title": "Forbidden",
+    "detail": "The root key doesn't have the required permissions for this endpoint",
+    "status": 403,
+    "type": "https://unkey.com/docs/errors/forbidden"
+  }
+}
+```
+
+**Common causes:**
+- Root key lacks required permissions
+- Attempting to access resources outside permitted scope
+- Workspace-level restrictions
+
+<Tip>
+  Always check the `detail` field in error responses for specific guidance on resolving authentication issues.
+</Tip>

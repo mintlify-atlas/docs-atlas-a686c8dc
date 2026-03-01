@@ -1,0 +1,494 @@
+---
+title: SDKs Overview
+description: Official Unkey SDKs for TypeScript, Go, and Python with installation guides and basic usage patterns
+---
+
+Unkey provides official SDKs for the most popular programming languages, making it easy to integrate API key management, verification, and rate limiting into your applications.
+
+## Available SDKs
+
+<CardGroup cols={3}>
+  <Card title="TypeScript/JavaScript" icon="js" href="/sdks/typescript">
+    Full-featured SDK for Node.js, Deno, Bun, and Cloudflare Workers
+  </Card>
+  <Card title="Go" icon="golang" href="/sdks/go">
+    Native Go SDK with middleware for popular frameworks
+  </Card>
+  <Card title="Python" icon="python" href="/sdks/python">
+    Python SDK with FastAPI, Flask, and Django support
+  </Card>
+</CardGroup>
+
+---
+
+## Core Capabilities
+
+All official SDKs provide:
+
+### API Key Verification
+Validate API keys on every request with built-in support for:
+- Expiration checking
+- Usage limits and credits
+- Rate limiting
+- Permissions and roles
+- Custom metadata
+
+### Key Management
+Create, update, and revoke API keys programmatically:
+- Generate keys with custom prefixes
+- Set expiration dates
+- Configure usage limits and auto-refill
+- Attach metadata and permissions
+
+### Rate Limiting
+Protect your APIs from abuse:
+- Flexible time windows (seconds, minutes, hours, days)
+- Cost-based limiting for expensive operations
+- Per-user or per-key limits
+- Multiple concurrent rate limits
+
+---
+
+## Quick Start
+
+### Installation
+
+<CodeGroup>
+
+```bash TypeScript/JavaScript
+npm install @unkey/api
+```
+
+```bash Go
+go get github.com/unkeyed/sdks/api/go/v2@latest
+```
+
+```bash Python
+pip install unkey-py
+```
+
+</CodeGroup>
+
+### Initialize the Client
+
+<CodeGroup>
+
+```typescript TypeScript/JavaScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({
+  rootKey: process.env.UNKEY_ROOT_KEY!,
+});
+```
+
+```go Go
+import (
+    "os"
+    unkey "github.com/unkeyed/sdks/api/go/v2"
+)
+
+client := unkey.New(
+    unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+)
+```
+
+```python Python
+import os
+from unkey_py import Unkey
+
+unkey = Unkey(
+    bearer_auth=os.environ["UNKEY_ROOT_KEY"]
+)
+```
+
+</CodeGroup>
+
+<Warning>
+Never expose your root key in client-side code or commit it to version control. These SDKs are designed for server-side use only.
+</Warning>
+
+### Verify an API Key
+
+<CodeGroup>
+
+```typescript TypeScript/JavaScript
+const { data } = await unkey.keys.verifyKey({
+  key: "sk_live_...",
+});
+
+if (!data.valid) {
+  console.log(`Key invalid: ${data.code}`);
+  return;
+}
+
+console.log("Key is valid!");
+console.log(`Key ID: ${data.keyId}`);
+```
+
+```go Go
+res, err := client.Keys.VerifyKey(ctx, components.V2KeysVerifyKeyRequestBody{
+    Key: "sk_live_...",
+})
+
+if err != nil {
+    log.Fatalf("Verification failed: %v", err)
+}
+
+result := res.V2KeysVerifyKeyResponseBody
+
+if !result.Valid {
+    fmt.Printf("Key invalid: %s\n", *result.Code)
+    return
+}
+
+fmt.Println("Key is valid!")
+```
+
+```python Python
+with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+    res = unkey.keys.verify_key(request={"key": "sk_live_..."})
+    result = res.data
+    
+    if not result.valid:
+        print(f"Key invalid: {result.code}")
+        return
+    
+    print("Key is valid!")
+    print(f"Key ID: {result.key_id}")
+```
+
+</CodeGroup>
+
+### Create an API Key
+
+<CodeGroup>
+
+```typescript TypeScript/JavaScript
+const { data } = await unkey.keys.create({
+  apiId: "api_...",
+  prefix: "sk_live",
+  externalId: "user_123",
+  remaining: 1000,
+  meta: {
+    plan: "pro",
+  },
+});
+
+console.log("New key:", data.key);
+console.log("Key ID:", data.keyId);
+```
+
+```go Go
+prefix := "sk_live"
+externalID := "user_123"
+remaining := int64(1000)
+
+res, err := client.Keys.CreateKey(ctx, components.V2KeysCreateKeyRequestBody{
+    APIID:      "api_...",
+    Prefix:     &prefix,
+    ExternalID: &externalID,
+    Credits: &components.KeyCreditsData{
+        Remaining: &remaining,
+    },
+    Meta: map[string]any{
+        "plan": "pro",
+    },
+})
+
+if err != nil {
+    log.Fatalf("Failed to create key: %v", err)
+}
+
+fmt.Printf("New key: %s\n", res.V2KeysCreateKeyResponseBody.Key)
+```
+
+```python Python
+with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+    res = unkey.keys.create_key(request={
+        "api_id": "api_...",
+        "prefix": "sk_live",
+        "external_id": "user_123",
+        "remaining": 1000,
+        "meta": {
+            "plan": "pro",
+        },
+    })
+    
+    print(f"New key: {res.data.key}")
+    print(f"Key ID: {res.data.key_id}")
+```
+
+</CodeGroup>
+
+<Warning>
+The full API key is only returned once at creation. Unkey stores only a cryptographic hash. Make sure to display it to your user immediately or store it securely.
+</Warning>
+
+---
+
+## Common Operations
+
+### Rate Limiting
+
+Protect your endpoints from abuse:
+
+<CodeGroup>
+
+```typescript TypeScript/JavaScript
+import { Ratelimit } from "@unkey/ratelimit";
+
+const limiter = new Ratelimit({
+  rootKey: process.env.UNKEY_ROOT_KEY!,
+  namespace: "my-app",
+  limit: 100,
+  duration: "60s",
+});
+
+const { success, remaining, reset } = await limiter.limit("user_123");
+
+if (!success) {
+  console.log(`Rate limited. Reset at: ${reset}`);
+}
+```
+
+```go Go
+res, err := client.Ratelimits.Limit(ctx, components.V2RatelimitsLimitRequestBody{
+    Namespace:  "my-app",
+    Identifier: "user_123",
+    Limit:      100,
+    Duration:   60000, // milliseconds
+})
+
+if err != nil {
+    log.Fatalf("Rate limit check failed: %v", err)
+}
+
+if !res.V2RatelimitsLimitResponseBody.Success {
+    fmt.Printf("Rate limited. Reset at: %d\n", res.V2RatelimitsLimitResponseBody.Reset)
+}
+```
+
+```python Python
+with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+    res = unkey.ratelimits.limit(request={
+        "namespace": "my-app",
+        "identifier": "user_123",
+        "limit": 100,
+        "duration": 60000,  # milliseconds
+    })
+    
+    if not res.data.success:
+        print(f"Rate limited. Reset at: {res.data.reset}")
+```
+
+</CodeGroup>
+
+### Update a Key
+
+<CodeGroup>
+
+```typescript TypeScript/JavaScript
+await unkey.keys.update({
+  keyId: "key_...",
+  name: "Updated name",
+  enabled: true,
+  meta: { plan: "enterprise" },
+});
+```
+
+```go Go
+enabled := true
+name := "Updated name"
+
+_, err := client.Keys.UpdateKey(ctx, components.V2KeysUpdateKeyRequestBody{
+    KeyID:   "key_...",
+    Name:    &name,
+    Enabled: &enabled,
+    Meta: map[string]any{
+        "plan": "enterprise",
+    },
+})
+```
+
+```python Python
+with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+    unkey.keys.update_key(request={
+        "key_id": "key_...",
+        "name": "Updated name",
+        "enabled": True,
+        "meta": {"plan": "enterprise"},
+    })
+```
+
+</CodeGroup>
+
+### Delete a Key
+
+<CodeGroup>
+
+```typescript TypeScript/JavaScript
+await unkey.keys.delete({
+  keyId: "key_...",
+});
+```
+
+```go Go
+_, err := client.Keys.DeleteKey(ctx, components.V2KeysDeleteKeyRequestBody{
+    KeyID: "key_...",
+})
+```
+
+```python Python
+with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+    unkey.keys.delete_key(request={"key_id": "key_..."})
+```
+
+</CodeGroup>
+
+---
+
+## Framework-Specific Guides
+
+### TypeScript/JavaScript
+
+<CardGroup cols={2}>
+  <Card title="Next.js" icon="react" href="/libraries/ts/nextjs">
+    withUnkey wrapper for API routes
+  </Card>
+  <Card title="Hono" icon="flame" href="/libraries/ts/hono">
+    Middleware for Hono apps
+  </Card>
+  <Card title="Express" icon="node-js" href="/quickstart/apis/express">
+    Express.js integration guide
+  </Card>
+  <Card title="Bun" icon="bread-slice" href="/quickstart/apis/bun">
+    Bun runtime guide
+  </Card>
+</CardGroup>
+
+### Go
+
+See the [Go SDK documentation](/sdks/go) for middleware examples with:
+- `net/http` (standard library)
+- Gin
+- Echo
+- Fiber
+
+### Python
+
+See the [Python SDK documentation](/sdks/python) for integration examples with:
+- FastAPI
+- Flask
+- Django
+
+---
+
+## Error Handling
+
+All SDKs use language-idiomatic error handling:
+
+<CodeGroup>
+
+```typescript TypeScript/JavaScript
+try {
+  const { data } = await unkey.keys.create({
+    apiId: "api_...",
+  });
+  
+  console.log("Created:", data.key);
+} catch (err) {
+  console.error("API Error:", err);
+  // Handle error
+}
+```
+
+```go Go
+res, err := client.Keys.CreateKey(ctx, components.V2KeysCreateKeyRequestBody{
+    APIID: "api_...",
+})
+
+if err != nil {
+    var apiErr *components.APIError
+    if errors.As(err, &apiErr) {
+        fmt.Printf("API Error: %s - %s\n", apiErr.Code, apiErr.Message)
+    } else {
+        fmt.Printf("Unexpected error: %v\n", err)
+    }
+    return
+}
+
+fmt.Printf("Created: %s\n", res.V2KeysCreateKeyResponseBody.Key)
+```
+
+```python Python
+try:
+    with Unkey(bearer_auth=os.environ["UNKEY_ROOT_KEY"]) as unkey:
+        res = unkey.keys.create_key(request={"api_id": "api_..."})
+        print(f"Created: {res.data.key}")
+except Exception as e:
+    print(f"API Error: {e}")
+    # Handle error
+```
+
+</CodeGroup>
+
+---
+
+## Runtime Support
+
+### TypeScript/JavaScript
+- Node.js 18+
+- Deno 1.25+
+- Bun 1.0+
+- Cloudflare Workers
+- Edge runtimes (Vercel, Netlify)
+
+### Go
+- Go 1.21 or higher
+
+### Python
+- Python 3.9 or higher
+
+---
+
+## Community SDKs
+
+The community has built SDKs for additional languages:
+
+<CardGroup cols={2}>
+  <Card title="Rust" icon="rust" href="https://github.com/unkey/rust">
+    Community-maintained Rust SDK
+  </Card>
+  <Card title="PHP" icon="php" href="https://github.com/unkey/php">
+    Community-maintained PHP SDK
+  </Card>
+  <Card title="Java" icon="java" href="https://github.com/unkey/java">
+    Community-maintained Java SDK
+  </Card>
+  <Card title=".NET" icon="microsoft" href="https://github.com/unkey/dotnet">
+    Community-maintained .NET SDK
+  </Card>
+</CardGroup>
+
+<Note>
+Community SDKs are maintained by the community and may have different features or update schedules than official SDKs.
+</Note>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="TypeScript SDK" icon="js" href="/sdks/typescript">
+    Full TypeScript/JavaScript SDK reference
+  </Card>
+  <Card title="Go SDK" icon="golang" href="/sdks/go">
+    Complete Go SDK documentation
+  </Card>
+  <Card title="Python SDK" icon="python" href="/sdks/python">
+    Complete Python SDK documentation
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference">
+    REST API documentation
+  </Card>
+</CardGroup>

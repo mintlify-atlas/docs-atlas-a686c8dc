@@ -1,0 +1,261 @@
+---
+title: Delete Protection
+description: Prevent accidental deletion of critical resources with delete protection
+---
+
+Delete Protection is a safety feature that prevents accidental deletion of critical resources. When enabled, it blocks all deletion attempts through both the dashboard and API.
+
+## Overview
+
+Delete Protection adds an extra layer of security by:
+
+- Preventing accidental deletion of critical resources
+- Requiring explicit confirmation to disable protection
+- Blocking deletion attempts through both UI and API
+- Returning clear error messages when deletion is attempted
+
+<Warning>
+Even with delete protection enabled, you can still modify resources and delete their children (like keys belonging to a protected API).
+</Warning>
+
+## Supported resources
+
+Currently, Delete Protection is available for:
+
+<Card title="APIs" icon="code">
+Protect your API configurations and settings from accidental deletion. This includes the API itself and its associated configuration, but not individual keys.
+</Card>
+
+More resources will be added in future updates.
+
+## Enable delete protection for APIs
+
+<Steps>
+<Step title="Navigate to API settings">
+Go to your API's settings page in the Unkey dashboard.
+</Step>
+
+<Step title="Click 'Enable Delete Protection'">
+Find the Delete Protection section and click the enable button.
+</Step>
+
+<Step title="Type the API name to confirm">
+Enter the exact name of your API to confirm you want to enable protection.
+
+<Frame caption="Delete Protection confirmation">
+<img src="/images/delete-protection.png" alt="Delete Protection confirmation dialog showing the Enable API Delete Protection button"/>
+</Frame>
+</Step>
+
+<Step title="Confirm protection">
+Click "Enable API Delete Protection" to activate the safeguard.
+</Step>
+</Steps>
+
+Once enabled, the API cannot be deleted until protection is explicitly disabled.
+
+## Disable delete protection
+
+To remove delete protection:
+
+<Steps>
+<Step title="Navigate to API settings">
+Go to your API's settings page in the Unkey dashboard.
+</Step>
+
+<Step title="Click 'Disable Delete Protection'">
+Find the Delete Protection section and click the disable button.
+</Step>
+
+<Step title="Type the API name to confirm">
+Enter the exact name of your API to confirm you want to disable protection.
+
+<Warning>
+Disabling delete protection makes the resource deletable again. Only disable when you're certain you need to remove the resource.
+</Warning>
+</Step>
+
+<Step title="Confirm removal">
+Click "Disable API Delete Protection" to remove the safeguard.
+</Step>
+</Steps>
+
+## Protected resource behavior
+
+When Delete Protection is enabled:
+
+- All deletion attempts are blocked
+- The API returns a `DELETE_PROTECTED` error
+- The error includes a link to this documentation
+- The resource remains fully operational and modifiable
+
+### Example API error response
+
+Attempting to delete a protected resource returns:
+
+```json
+{
+  "error": {
+    "code": "DELETE_PROTECTED",
+    "docs": "https://unkey.com/docs/api-reference/errors/code/DELETE_PROTECTED",
+    "message": "api [apiId] is protected from deletions",
+    "requestId": "req_1234"
+  }
+}
+```
+
+### Dashboard behavior
+
+In the dashboard:
+
+- Delete buttons are disabled or show a warning
+- Attempting deletion shows a modal explaining protection is enabled
+- You must explicitly disable protection before deletion is possible
+
+## Best practices
+
+<AccordionGroup>
+<Accordion title="Enable for production resources">
+Always enable Delete Protection for resources running in production environments. This prevents accidents during deployments or configuration changes.
+
+**Protected resources:**
+- Production APIs
+- High-traffic services
+- Resources with external dependencies
+</Accordion>
+
+<Accordion title="Use for critical resources">
+Protect resources that contain important data or configurations that would be difficult to recreate:
+
+- APIs with complex permission configurations
+- Resources with many dependencies
+- Services that require significant setup time
+</Accordion>
+
+<Accordion title="Regular protection review">
+Periodically review which resources have delete protection:
+
+```bash
+# Audit protected resources quarterly
+- Check if protection is still needed
+- Verify production resources are protected
+- Remove protection from deprecated resources
+```
+</Accordion>
+
+<Accordion title="Team communication">
+Inform team members about protected resources:
+
+- Document which resources are protected and why
+- Include protection status in runbooks
+- Communicate before enabling/disabling protection
+- Use clear naming conventions for protected resources
+</Accordion>
+
+<Accordion title="Infrastructure as Code">
+When using IaC tools (Terraform, etc.), ensure delete protection is part of your configuration:
+
+```hcl
+resource "unkey_api" "production" {
+  name = "production-api"
+  delete_protection = true
+}
+```
+</Accordion>
+</AccordionGroup>
+
+## Limitations
+
+Understand what delete protection does and doesn't cover:
+
+<Card title="What's protected" icon="shield-check">
+- The resource itself cannot be deleted
+- Explicit disable step required before deletion
+- Works across both UI and API
+</Card>
+
+<Card title="What's not protected" icon="triangle-exclamation">
+- Modifications to the resource are still allowed
+- Child resources can still be deleted (e.g., keys belonging to a protected API)
+- Users with appropriate permissions can disable protection
+- Does not prevent key revocation or rate limit changes
+</Card>
+
+<Note>
+Delete protection is not a replacement for proper access control and backup strategies. Use it as an additional safety layer.
+</Note>
+
+## Workflow integration
+
+### CI/CD pipelines
+
+Integrate delete protection checks in deployment pipelines:
+
+```yaml
+# GitHub Actions example
+name: Deploy
+on: [push]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check delete protection
+        run: |
+          # Verify production APIs have protection enabled
+          if [ "$ENVIRONMENT" = "production" ]; then
+            # Check API protection status
+            curl -H "Authorization: Bearer $UNKEY_ROOT_KEY" \
+              https://api.unkey.com/v2/apis/$API_ID | \
+              jq -e '.deleteProtection == true'
+          fi
+```
+
+### Monitoring and alerts
+
+Set up alerts for protection status changes:
+
+- Monitor audit logs for `delete_protection.enabled` events
+- Alert when protection is disabled on critical resources
+- Track who disabled protection and when
+
+## Migration strategy
+
+When you need to delete a protected resource:
+
+<Steps>
+<Step title="Backup configuration">
+Export current resource configuration and data before proceeding.
+</Step>
+
+<Step title="Notify stakeholders">
+Inform team members and dependent services about the planned deletion.
+</Step>
+
+<Step title="Remove dependencies">
+Update or remove systems that depend on this resource.
+</Step>
+
+<Step title="Disable protection">
+Follow the disable process with proper authorization and documentation.
+</Step>
+
+<Step title="Delete resource">
+Perform the deletion and verify dependent systems are unaffected.
+</Step>
+
+<Step title="Document">
+Record the deletion in your change log with reasoning and date.
+</Step>
+</Steps>
+
+## Related documentation
+
+<CardGroup cols={2}>
+  <Card title="Root Keys" icon="key" href="/security/root-keys">
+    Manage permissions for delete operations
+  </Card>
+  <Card title="Audit Logs" icon="scroll" href="/audit-log/introduction">
+    Track protection status changes
+  </Card>
+</CardGroup>

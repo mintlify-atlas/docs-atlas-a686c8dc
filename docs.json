@@ -1,122 +1,156 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Unkey",
+  "theme": "palm",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#7c3aed",
+    "light": "#a78bfa",
+    "dark": "#5b21b6"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/unkeyed/unkey"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/unkeyed/unkey"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "glossary"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Features",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "features/api-keys",
+              "features/rate-limiting",
+              "features/identities",
+              "features/analytics",
+              "features/audit-logs"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Integration Guides",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "guides/nextjs",
+              "guides/express",
+              "guides/hono",
+              "guides/go",
+              "guides/python",
+              "guides/cloudflare-workers"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Advanced Topics",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "advanced/authorization",
+              "advanced/usage-limits",
+              "advanced/key-expiration",
+              "advanced/rate-limit-overrides",
+              "advanced/multi-tenant"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "security/overview",
+              "security/root-keys",
+              "security/key-recovery",
+              "security/delete-protection"
+            ]
+          },
+          {
+            "group": "Platform",
+            "pages": [
+              "platform/architecture",
+              "platform/deployments",
+              "platform/self-hosting"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Overview",
             "pages": [
-              "api-reference/introduction"
+              "api/introduction",
+              "api/authentication",
+              "api/errors"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Keys",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/keys/create",
+              "api/keys/verify",
+              "api/keys/update",
+              "api/keys/delete",
+              "api/keys/list"
+            ]
+          },
+          {
+            "group": "APIs",
+            "pages": [
+              "api/apis/create",
+              "api/apis/get",
+              "api/apis/delete",
+              "api/apis/list-keys"
+            ]
+          },
+          {
+            "group": "Rate Limiting",
+            "pages": [
+              "api/ratelimit/limit",
+              "api/ratelimit/overrides"
+            ]
+          },
+          {
+            "group": "Identities",
+            "pages": [
+              "api/identities/create",
+              "api/identities/get",
+              "api/identities/update",
+              "api/identities/delete",
+              "api/identities/list"
+            ]
+          },
+          {
+            "group": "Analytics",
+            "pages": [
+              "api/analytics/query",
+              "api/analytics/verifications"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "SDKs",
+        "groups": [
+          {
+            "group": "Official SDKs",
+            "pages": [
+              "sdks/overview",
+              "sdks/typescript",
+              "sdks/go",
+              "sdks/python"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

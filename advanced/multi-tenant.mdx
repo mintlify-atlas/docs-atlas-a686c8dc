@@ -1,0 +1,624 @@
+---
+title: Multi-Tenant Applications
+description: Use identities to manage API keys, rate limits, and permissions across multiple organizations and users
+---
+
+Multi-tenant applications serve multiple customers (tenants) from a single codebase. Unkey's identities feature makes it easy to manage API keys, enforce shared limits, and scope permissions per tenant — whether your tenants are individual users, teams, or entire organizations.
+
+## What are identities?
+
+Identities connect multiple API keys to a single entity. Think of them as a grouping mechanism:
+
+<CardGroup cols={2}>
+  <Card title="Without identities" icon="key">
+    Each API key is isolated. A user with 3 keys has 3 separate rate limits and configurations.
+  </Card>
+  <Card title="With identities" icon="users">
+    Group all keys under one identity. Share rate limits, metadata, and permissions across all keys for that tenant.
+  </Card>
+</CardGroup>
+
+## Why use identities for multi-tenant apps?
+
+| Challenge | Solution with Identities |
+|-----------|-------------------------|
+| User has 5 keys, can bypass rate limits | Single shared rate limit across all keys |
+| Need to update metadata on all keys | Update once on identity, applies to all |
+| Can't track total usage per customer | Aggregate analytics by identity |
+| Complex permission management | Set permissions on identity, inherit on keys |
+
+## Architecture patterns
+
+### User-based tenancy
+
+Each user gets their own identity:
+
+```typescript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY });
+
+// Create identity for a user
+export async function onUserSignup(userId: string, email: string) {
+  try {
+    const { meta, data } = await unkey.identities.create({
+      externalId: userId,  // Your internal user ID
+      meta: {
+        email,
+        plan: "free",
+        signupDate: new Date().toISOString(),
+      },
+    });
+
+    return data.identityId;
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
+}
+
+// Create keys linked to the user
+export async function createUserKey(userId: string, keyName: string) {
+  const { data } = await unkey.keys.create({
+    apiId: "api_...",
+    externalId: userId,  // Links to the identity
+    name: keyName,
+  });
+
+  return data.key;
+}
+```
+
+### Organization-based tenancy
+
+Entire organizations share a single identity:
+
+```typescript
+// Create identity for an organization
+export async function onOrgCreated(orgId: string, orgName: string) {
+  const { data } = await unkey.identities.create({
+    externalId: orgId,
+    meta: {
+      orgName,
+      plan: "team",
+      seats: 5,
+      createdAt: new Date().toISOString(),
+    },
+  });
+
+  return data.identityId;
+}
+
+// Team members create keys linked to the org
+export async function createTeamMemberKey(
+  orgId: string,
+  userId: string,
+  role: string
+) {
+  const { data } = await unkey.keys.create({
+    apiId: "api_...",
+    externalId: orgId,  // All team members share the org identity
+    name: `${userId} - ${role}`,
+    meta: {
+      userId,
+      role,
+    },
+  });
+
+  return data.key;
+}
+```
+
+### Hybrid tenancy
+
+Users have individual keys, but organizations have shared resources:
+
+```typescript
+// Create both user and org identities
+export async function setupHybridTenant(userId: string, orgId: string) {
+  // User-specific identity (for personal limits)
+  const { data: userIdentity } = await unkey.identities.create({
+    externalId: `user:${userId}`,
+    meta: { type: "user", userId },
+  });
+
+  // Org-specific identity (for shared limits)
+  const { data: orgIdentity } = await unkey.identities.create({
+    externalId: `org:${orgId}`,
+    meta: { type: "org", orgId },
+  });
+
+  return { userIdentity, orgIdentity };
+}
+
+// Keys can reference either identity based on context
+export async function createContextualKey(
+  userId: string,
+  orgId: string,
+  scope: "personal" | "team"
+) {
+  const externalId = scope === "personal" ? `user:${userId}` : `org:${orgId}`;
+
+  const { data } = await unkey.keys.create({
+    apiId: "api_...",
+    externalId,
+    name: `${scope} key`,
+  });
+
+  return data.key;
+}
+```
+
+## Shared rate limits
+
+Enforce rate limits across all keys for a tenant:
+
+```typescript
+// Create an org with shared rate limits
+export async function createOrgWithLimits(orgId: string, tier: string) {
+  const tierLimits = {
+    free: { limit: 1000, duration: 3600000 },      // 1k/hour
+    team: { limit: 10000, duration: 3600000 },     // 10k/hour
+    enterprise: { limit: 100000, duration: 3600000 }, // 100k/hour
+  };
+
+  const limits = tierLimits[tier];
+
+  try {
+    const { meta, data } = await unkey.identities.create({
+      externalId: orgId,
+      ratelimits: [
+        {
+          name: "org-requests",
+          limit: limits.limit,
+          duration: limits.duration,
+        },
+      ],
+    });
+
+    return data.identityId;
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
+}
+
+// All keys for this org share the limit
+const key1 = await unkey.keys.create({
+  apiId: "api_...",
+  externalId: orgId,
+  name: "Production Key",
+});
+
+const key2 = await unkey.keys.create({
+  apiId: "api_...",
+  externalId: orgId,
+  name: "Staging Key",
+});
+
+// Both keys consume from the same 10k/hour pool
+```
+
+<Note>
+**Key-level rate limits still apply.** If a key has its own rate limit, both the key limit and identity limit are enforced. The stricter limit wins.
+</Note>
+
+## Shared metadata
+
+Store tenant configuration on the identity:
+
+```typescript
+// Create identity with rich metadata
+export async function createTenant(orgId: string) {
+  const { data } = await unkey.identities.create({
+    externalId: orgId,
+    meta: {
+      plan: "pro",
+      features: ["api-access", "webhooks", "analytics"],
+      billingEmail: "billing@acme.com",
+      maxTeamSize: 10,
+      customDomain: "api.acme.com",
+      webhookUrl: "https://acme.com/webhooks/unkey",
+    },
+  });
+
+  return data.identityId;
+}
+
+// Access metadata during verification
+export async function handleRequest(request: Request) {
+  const { data } = await verifyKey({
+    key: request.apiKey,
+  });
+
+  if (!data.valid) {
+    return Response.json({ error: data.code }, { status: 401 });
+  }
+
+  const identity = data.identity;
+  const features = identity?.meta?.features ?? [];
+
+  if (!features.includes("api-access")) {
+    return Response.json(
+      { error: "Your plan doesn't include API access" },
+      { status: 403 }
+    );
+  }
+
+  // Process request
+}
+```
+
+## Permission scoping
+
+Combine identities with RBAC for tenant-scoped permissions:
+
+```typescript
+// Create org with roles
+export async function setupOrgRBAC(orgId: string) {
+  // Create identity
+  const { data: identity } = await unkey.identities.create({
+    externalId: orgId,
+    meta: {
+      orgName: "Acme Corp",
+    },
+  });
+
+  // Create keys with different roles
+  const adminKey = await unkey.keys.create({
+    apiId: "api_...",
+    externalId: orgId,
+    roles: ["org.admin"],
+    name: "Admin Key",
+  });
+
+  const memberKey = await unkey.keys.create({
+    apiId: "api_...",
+    externalId: orgId,
+    roles: ["org.member"],
+    name: "Member Key",
+  });
+
+  const readonlyKey = await unkey.keys.create({
+    apiId: "api_...",
+    externalId: orgId,
+    roles: ["org.readonly"],
+    name: "Readonly Key",
+  });
+
+  return { adminKey, memberKey, readonlyKey };
+}
+
+// Verify with permissions
+export async function handleOrgAction(request: Request, action: string) {
+  const requiredPermission = `org.${action}`;
+
+  const { data } = await verifyKey({
+    key: request.apiKey,
+    permissions: requiredPermission,
+  });
+
+  if (!data.valid) {
+    if (data.code === "INSUFFICIENT_PERMISSIONS") {
+      return Response.json(
+        { error: `Missing permission: ${requiredPermission}` },
+        { status: 403 }
+      );
+    }
+    return Response.json({ error: data.code }, { status: 401 });
+  }
+
+  // Action allowed
+  const orgId = data.identity?.externalId;
+  // Perform action scoped to orgId
+}
+```
+
+## Usage tracking per tenant
+
+Aggregate analytics by identity:
+
+```typescript
+export async function getTenantUsage(orgId: string) {
+  // Get all keys for this org
+  const allKeys = await unkey.keys.list({ apiId: "api_..." });
+  const orgKeys = allKeys.filter(
+    (key) => key.identity?.externalId === orgId
+  );
+
+  // Aggregate usage across all keys
+  let totalRequests = 0;
+  let totalCreditsUsed = 0;
+
+  for (const key of orgKeys) {
+    const analytics = await unkey.analytics.getKeyUsage({ keyId: key.keyId });
+    totalRequests += analytics.requests;
+    totalCreditsUsed += analytics.creditsUsed;
+  }
+
+  return {
+    orgId,
+    totalKeys: orgKeys.length,
+    totalRequests,
+    totalCreditsUsed,
+  };
+}
+```
+
+## Plan upgrades and downgrades
+
+Update identity when tenants change plans:
+
+```typescript
+export async function upgradeTenant(
+  orgId: string,
+  newPlan: "free" | "team" | "enterprise"
+) {
+  const planConfig = {
+    free: {
+      ratelimit: { limit: 1000, duration: 3600000 },
+      features: ["api-access"],
+    },
+    team: {
+      ratelimit: { limit: 10000, duration: 3600000 },
+      features: ["api-access", "webhooks", "analytics"],
+    },
+    enterprise: {
+      ratelimit: null, // Unlimited
+      features: ["api-access", "webhooks", "analytics", "sso", "dedicated-support"],
+    },
+  };
+
+  const config = planConfig[newPlan];
+
+  // Update identity
+  await unkey.identities.update({
+    externalId: orgId,
+    meta: {
+      plan: newPlan,
+      features: config.features,
+      upgradedAt: new Date().toISOString(),
+    },
+    ratelimits: config.ratelimit
+      ? [
+          {
+            name: "org-requests",
+            limit: config.ratelimit.limit,
+            duration: config.ratelimit.duration,
+          },
+        ]
+      : [],
+  });
+
+  // Notify the organization
+  await sendEmail({
+    to: orgId,
+    subject: `Upgraded to ${newPlan} plan`,
+    body: `Your organization has been upgraded to the ${newPlan} plan.`,
+  });
+}
+```
+
+## Multi-environment support
+
+Manage separate environments per tenant:
+
+```typescript
+export async function setupTenantEnvironments(orgId: string) {
+  // Create identity for the org
+  const { data: identity } = await unkey.identities.create({
+    externalId: orgId,
+    meta: {
+      orgName: "Acme Corp",
+    },
+  });
+
+  // Create environment-specific keys
+  const devKey = await unkey.keys.create({
+    apiId: "api_...",
+    externalId: orgId,
+    name: "Development",
+    meta: {
+      environment: "dev",
+    },
+  });
+
+  const stagingKey = await unkey.keys.create({
+    apiId: "api_...",
+    externalId: orgId,
+    name: "Staging",
+    meta: {
+      environment: "staging",
+    },
+  });
+
+  const prodKey = await unkey.keys.create({
+    apiId: "api_...",
+    externalId: orgId,
+    name: "Production",
+    meta: {
+      environment: "production",
+    },
+  });
+
+  return { devKey, stagingKey, prodKey };
+}
+
+// Verify and check environment
+export async function handleRequest(request: Request, env: string) {
+  const { data } = await verifyKey({ key: request.apiKey });
+
+  if (!data.valid) {
+    return Response.json({ error: data.code }, { status: 401 });
+  }
+
+  // Verify key is for the correct environment
+  if (data.meta?.environment !== env) {
+    return Response.json(
+      { error: `Key is for ${data.meta?.environment}, not ${env}` },
+      { status: 403 }
+    );
+  }
+
+  // Process request
+}
+```
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Use external IDs from your system">
+    Always use your own user/org IDs as the `externalId`. This makes it easy to look up identities and keeps your systems in sync.
+  </Accordion>
+  
+  <Accordion title="Store minimal metadata on keys">
+    Put shared configuration on the identity, not individual keys. Only store key-specific data (like environment or name) on the key itself.
+  </Accordion>
+  
+  <Accordion title="Enforce limits at identity level">
+    For true multi-tenancy, set rate limits and quotas on the identity. This prevents users from bypassing limits by creating multiple keys.
+  </Accordion>
+  
+  <Accordion title="Scope permissions by tenant">
+    Use identities to isolate data. In your application, always filter queries by the identity's `externalId` to prevent cross-tenant data leaks.
+  </Accordion>
+</AccordionGroup>
+
+## Real-world example: SaaS platform
+
+Complete implementation for a multi-tenant SaaS:
+
+<Steps>
+  <Step title="Create organization">
+    ```typescript
+    export async function createOrganization({
+      orgId,
+      orgName,
+      plan,
+    }: {
+      orgId: string;
+      orgName: string;
+      plan: "free" | "team" | "enterprise";
+    }) {
+      const planLimits = {
+        free: { requests: 1000, duration: 3600000 },
+        team: { requests: 10000, duration: 3600000 },
+        enterprise: { requests: 100000, duration: 3600000 },
+      };
+
+      const limits = planLimits[plan];
+
+      const { data } = await unkey.identities.create({
+        externalId: orgId,
+        meta: {
+          orgName,
+          plan,
+          createdAt: new Date().toISOString(),
+          features: plan === "enterprise" ? ["all"] : ["basic"],
+        },
+        ratelimits: [
+          {
+            name: "org-requests",
+            limit: limits.requests,
+            duration: limits.duration,
+          },
+        ],
+      });
+
+      return data.identityId;
+    }
+    ```
+  </Step>
+  
+  <Step title="Add team members">
+    ```typescript
+    export async function addTeamMember({
+      orgId,
+      userId,
+      role,
+    }: {
+      orgId: string;
+      userId: string;
+      role: "admin" | "member" | "viewer";
+    }) {
+      const roleMapping = {
+        admin: ["org.admin"],
+        member: ["org.member"],
+        viewer: ["org.viewer"],
+      };
+
+      const { data } = await unkey.keys.create({
+        apiId: "api_...",
+        externalId: orgId,
+        roles: roleMapping[role],
+        name: `${userId} - ${role}`,
+        meta: {
+          userId,
+          role,
+          addedAt: new Date().toISOString(),
+        },
+      });
+
+      return data.key;
+    }
+    ```
+  </Step>
+  
+  <Step title="Verify with tenant isolation">
+    ```typescript
+    export async function handleAPIRequest(request: Request) {
+      const { data } = await verifyKey({
+        key: request.apiKey,
+      });
+
+      if (!data.valid) {
+        return Response.json({ error: data.code }, { status: 401 });
+      }
+
+      // Get org ID from identity
+      const orgId = data.identity?.externalId;
+
+      if (!orgId) {
+        return Response.json({ error: "No org associated" }, { status: 403 });
+      }
+
+      // Scope all queries to this org
+      const resources = await db.resources.findMany({
+        where: { orgId },
+      });
+
+      return Response.json({ resources });
+    }
+    ```
+  </Step>
+  
+  <Step title="Handle upgrades">
+    ```typescript
+    export async function upgradeOrg(orgId: string, newPlan: string) {
+      await upgradeTenant(orgId, newPlan);
+
+      // Notify all team members
+      const allKeys = await unkey.keys.list({ apiId: "api_..." });
+      const orgKeys = allKeys.filter(
+        (key) => key.identity?.externalId === orgId
+      );
+
+      for (const key of orgKeys) {
+        const userId = key.meta?.userId;
+        await notifyUser(userId, `Org upgraded to ${newPlan}`);
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Authorization with RBAC" icon="shield" href="/advanced/authorization">
+    Add role-based permissions to your multi-tenant app
+  </Card>
+  <Card title="Rate limit overrides" icon="gauge-high" href="/advanced/rate-limit-overrides">
+    Customize rate limits per tenant tier
+  </Card>
+</CardGroup>

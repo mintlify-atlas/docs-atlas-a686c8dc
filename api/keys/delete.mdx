@@ -1,0 +1,202 @@
+---
+title: Delete API Keys
+description: Delete API keys permanently from user accounts or for cleanup purposes
+---
+
+Delete API keys permanently from user accounts or for cleanup purposes.
+
+Use this for user-requested key deletion, account deletion workflows, or cleaning up unused keys. Keys are immediately invalidated. Two modes: soft delete (default, preserves audit records) and permanent delete.
+
+**Important**: For temporary access control, use `updateKey` with `enabled: false` instead of deletion.
+
+## Required Permissions
+
+Your root key must have one of the following permissions:
+- `api.*.delete_key` (to delete keys in any API)
+- `api.<api_id>.delete_key` (to delete keys in a specific API)
+
+## Request
+
+<ParamField body="keyId" type="string" required>
+  Specifies which key to delete using the database identifier returned from `createKey`. Do not confuse this with the actual API key string that users include in requests.
+  
+  Deletion immediately invalidates the key, causing all future verification attempts to fail with `code=NOT_FOUND`. Key deletion triggers cache invalidation across all regions but may take up to 30 seconds to fully propagate.
+  
+  **Pattern**: `^[a-zA-Z0-9_]+$`
+  
+  **Example**: `key_2cGKbMxRyIzhCxo1Idjz8q`
+</ParamField>
+
+<ParamField body="permanent" type="boolean" default="false">
+  Controls deletion behavior between recoverable soft-deletion and irreversible permanent erasure.
+  
+  - **Soft deletion (default)**: Preserves key data for potential recovery through direct database operations.
+  - **Permanent deletion**: Completely removes all traces including hash values and metadata with no recovery option.
+  
+  Use permanent deletion only for regulatory compliance (GDPR), resolving hash collisions, or when reusing identical key strings. Permanent deletion cannot be undone and may affect analytics data that references the deleted key.
+  
+  Most applications should use soft deletion to maintain audit trails and prevent accidental data loss.
+</ParamField>
+
+## Response
+
+The response contains an empty data object on success.
+
+<ResponseField name="data" type="object">
+  Empty object indicating successful deletion.
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.deleteKey \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_1234abcd"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+await unkey.keys.delete({
+  keyId: "key_1234abcd",
+});
+
+console.log("Key deleted successfully");
+```
+
+```python Python
+import os
+import requests
+
+response = requests.post(
+    "https://api.unkey.com/v2/keys.deleteKey",
+    headers={
+        "Authorization": f"Bearer {os.environ['UNKEY_ROOT_KEY']}",
+        "Content-Type": "application/json"
+    },
+    json={
+        "keyId": "key_1234abcd"
+    }
+)
+
+if response.status_code == 200:
+    print("Key deleted successfully")
+```
+
+```go Go
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/unkeyed/unkey-go"
+	"github.com/unkeyed/unkey-go/models/components"
+)
+
+func main() {
+	uk := unkey.New(
+		unkey.WithSecurity(os.Getenv("UNKEY_ROOT_KEY")),
+	)
+
+	ctx := context.Background()
+	_, err := uk.Keys.DeleteKey(ctx, &components.V2KeysDeleteKeyRequestBody{
+		KeyID: "key_1234abcd",
+	})
+
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println("Key deleted successfully")
+}
+```
+</CodeGroup>
+
+### Permanent Deletion
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.deleteKey \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_9876wxyz",
+    "permanent": true
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+await unkey.keys.delete({
+  keyId: "key_9876wxyz",
+  permanent: true,
+});
+
+console.log("Key permanently deleted for GDPR compliance");
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_user_delete_1234"
+  },
+  "data": {}
+}
+```
+
+## Use Cases
+
+### User-Requested Deletion
+Delete key when user clicks "Delete" in your dashboard:
+
+```typescript
+await unkey.keys.delete({ keyId: "key_1234abcd" });
+```
+
+### Account Deletion
+Remove keys during complete account deletion workflow:
+
+```typescript
+await unkey.keys.delete({ 
+  keyId: "key_5678efgh",
+  permanent: false // Keep audit trail
+});
+```
+
+### GDPR Compliance
+Permanently remove key for regulatory compliance:
+
+```typescript
+await unkey.keys.delete({ 
+  keyId: "key_9876wxyz",
+  permanent: true // Complete erasure
+});
+```
+
+### Key Rotation
+Remove old key after successful rotation:
+
+```typescript
+// Create new key first
+const newKey = await unkey.keys.create({ /* ... */ });
+
+// Then delete old key
+await unkey.keys.delete({ 
+  keyId: "key_old_5678",
+  permanent: false
+});
+```

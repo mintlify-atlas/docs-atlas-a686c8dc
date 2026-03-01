@@ -1,0 +1,279 @@
+---
+title: Key Recovery
+description: Securely store and recover API keys using Unkey's encrypted vault system
+---
+
+By default, Unkey follows security best practices: we generate keys, return them once, and store only their hash. This means nobody—not even someone with database access—can recover the original key.
+
+However, some use cases benefit from key recovery:
+
+- API playgrounds that need to display keys for testing
+- Improved developer experience when keys are lost
+- Customer support scenarios requiring key retrieval
+
+## How the vault works
+
+Unkey's vault is a secure storage system for secrets built with defense in depth:
+
+<CardGroup cols={2}>
+  <Card title="Encrypted at rest" icon="lock">
+    All secrets are encrypted using industry-standard encryption before storage
+  </Card>
+  <Card title="Isolated storage" icon="database">
+    Vault runs on separate infrastructure from the main database
+  </Card>
+  <Card title="Multi-layer protection" icon="shield">
+    Requires vault data + main database + encryption keys to decrypt
+  </Card>
+  <Card title="Regular rotation" icon="rotate">
+    Encryption keys are rotated regularly to minimize exposure window
+  </Card>
+</CardGroup>
+
+### Security guarantees
+
+- A leak of vault data does not expose secrets
+- A leak of the main database does not expose secrets  
+- A leak of the main encryption keys does not expose secrets
+
+An attacker would need simultaneous access to all three systems to decrypt secrets.
+
+For technical details, see our [engineering docs](https://engineering.unkey.dev/services/vault).
+
+## Opting in to key recovery
+
+By default, we only store key hashes, not encrypted keys.
+
+<Steps>
+<Step title="Enable encryption permission">
+Your root key must have the `encrypt_key` permission to create recoverable keys.
+
+1. Go to [Settings → Root Keys](https://app.unkey.com/settings/root-keys)
+2. Edit your root key or create a new one
+3. Enable the `encrypt_key` permission
+
+<Warning>
+Do not skip this step. API requests will be rejected if your root key lacks encryption permission when trying to create recoverable keys.
+</Warning>
+</Step>
+
+<Step title="Contact us to enable recovery">
+Send an email to [support@unkey.com](mailto:support@unkey.com?subject=Recovery%20Opt%20In) to opt in to key recovery.
+
+**Include in your email:**
+- Send from the email address associated with your workspace
+- The `API ID` you want to enable recovery for
+- Confirmation you understand the security implications
+</Step>
+</Steps>
+
+<Note>
+This is not retroactive. Existing keys were never stored and cannot be recovered. Only keys created after opting in can be recovered.
+</Note>
+
+## Creating recoverable keys
+
+When creating a key via API, set `recoverable: true`:
+
+```bash
+curl --request POST \
+  --url https://api.unkey.com/v2/keys.createKey \
+  --header 'Authorization: Bearer {ROOT_KEY}' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "apiId": "{API_ID}",
+    "recoverable": true
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "key": "sk_live_abc123xyz789...",
+  "keyId": "key_1234567890"
+}
+```
+
+The key is now:
+- Returned to you in plaintext (this is the only time you'll see it normally)
+- Stored as a hash for verification
+- Stored encrypted in the vault for recovery
+
+## Recovering plaintext keys
+
+Both the [getKey](/api-reference/v2/keys/get-api-key) and [listKeys](/api-reference/v2/apis/list-api-keys) endpoints accept a `decrypt` query parameter.
+
+<Warning>
+Your root key must have the `decrypt_key` permission to recover keys. Enable this permission in [Settings → Root Keys](https://app.unkey.com/settings/root-keys).
+</Warning>
+
+### Get a single key
+
+```bash
+curl --request POST \
+  --url https://api.unkey.com/v2/keys.getKey \
+  --header 'Authorization: Bearer {ROOT_KEY}' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "keyId": "{KEY_ID}",
+    "decrypt": true
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "keyId": "key_1234567890",
+  "plaintext": "sk_live_abc123xyz789...",
+  "createdAt": 1234567890,
+  "enabled": true
+  // ... other key metadata
+}
+```
+
+### List keys with decryption
+
+```bash
+curl --request GET \
+  --url 'https://api.unkey.com/v2/apis/{API_ID}/keys?decrypt=true' \
+  --header 'Authorization: Bearer {ROOT_KEY}'
+```
+
+**Response:**
+
+```json
+{
+  "keys": [
+    {
+      "keyId": "key_1234567890",
+      "plaintext": "sk_live_abc123xyz789...",
+      // ... other metadata
+    }
+  ],
+  "total": 1
+}
+```
+
+## Use cases
+
+### API playground
+
+Show users their keys in an API testing interface:
+
+```typescript
+// Fetch user's key for playground
+const response = await fetch('https://api.unkey.com/v2/keys.getKey', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${UNKEY_ROOT_KEY}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    keyId: userKeyId,
+    decrypt: true
+  })
+});
+
+const { plaintext } = await response.json();
+
+// Display in playground
+console.log('Your API key:', plaintext);
+```
+
+### Customer support
+
+Retrieve a customer's lost key:
+
+```typescript
+// Support dashboard: recover customer key
+async function recoverCustomerKey(customerId: string) {
+  const keys = await unkey.apis.listKeys({
+    apiId: API_ID,
+    decrypt: true
+  });
+  
+  const customerKey = keys.find(k => k.meta?.customerId === customerId);
+  
+  if (customerKey?.plaintext) {
+    return customerKey.plaintext;
+  }
+  
+  throw new Error('Key not found or not recoverable');
+}
+```
+
+## Security considerations
+
+<Warning>
+**Be extremely careful with decrypt permission.** Root keys with `decrypt_key` permission can access all plaintext keys. Treat these keys with maximum security.
+</Warning>
+
+### Best practices
+
+1. **Separate root keys** - Use different root keys for encryption and decryption
+2. **Minimal use** - Only decrypt when absolutely necessary
+3. **Audit logs** - Monitor decryption operations in audit logs
+4. **Rotate regularly** - Rotate root keys with decrypt permission frequently
+5. **Network isolation** - Call decrypt operations from secure backend services only
+
+### When not to use recovery
+
+Do not enable key recovery if:
+
+- Your users can easily regenerate keys
+- You don't need to display keys after creation
+- Your security policy requires hash-only storage
+- You want maximum security with minimal attack surface
+
+<Note>
+Most applications don't need key recovery. The hash-only approach is more secure and simpler to operate.
+</Note>
+
+## Recovering from leaked keys
+
+If a key is compromised:
+
+1. **Revoke immediately** - Disable or delete the key via API or dashboard
+2. **Create replacement** - Generate a new key for the user
+3. **Check audit logs** - Review logs for unauthorized key usage
+4. **Notify user** - Inform the user their key was rotated
+
+### GitHub secret scanning
+
+Unkey partners with GitHub to automatically detect leaked root keys:
+
+- GitHub scans repositories for Unkey key patterns
+- If found, GitHub notifies Unkey
+- You receive an email alert with details
+- Keys remain active to avoid production outages
+
+**Scanned locations:**
+- Commit content and comments
+- Pull request titles, descriptions, comments
+- Issue titles, descriptions, comments
+- Discussion content
+- Gist content and comments
+- NPM packages
+
+[Learn more about GitHub secret scanning →](https://docs.github.com/en/code-security/secret-scanning)
+
+## Get help
+
+<Info>
+Questions about key recovery? Contact [support@unkey.com](mailto:support@unkey.com).
+
+For security concerns, disclose responsibly to [security@unkey.com](mailto:security@unkey.com).
+</Info>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Root Keys" icon="key" href="/security/root-keys">
+    Learn about root key permissions
+  </Card>
+  <Card title="Delete Protection" icon="shield" href="/security/delete-protection">
+    Prevent accidental key deletion
+  </Card>
+</CardGroup>

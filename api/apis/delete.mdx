@@ -1,0 +1,60 @@
+---
+title: 'Delete API'
+description: 'Permanently delete an API namespace and immediately invalidate all associated keys'
+---
+
+## POST /v2/apis.deleteApi
+
+Permanently delete an API namespace and immediately invalidate all associated keys. Use this for cleaning up development environments, retiring deprecated services, or removing unused resources. All keys in the namespace are immediately marked as deleted and will fail verification with `code=NOT_FOUND`.
+
+**Important**: This operation is immediate and permanent. Verify you have the correct API ID before deletion. If delete protection is enabled, disable it first through the dashboard or API configuration.
+
+### Required Permissions
+
+Your root key must have one of the following permissions:
+- `api.*.delete_api` (to delete any API)
+- `api.<api_id>.delete_api` (to delete a specific API)
+
+### Request
+
+<ParamField body="apiId" type="string" required>
+  Specifies which API namespace to permanently delete from your workspace. Must be a valid API ID that begins with 'api_' and exists within your workspace.
+  
+  Before proceeding, ensure you have the correct API ID and understand that this action cannot be undone. If you need to migrate functionality, create replacement keys in a new API namespace and update client applications before deletion.
+  
+  Example: `api_1234abcd`
+</ParamField>
+
+### Response
+
+Returns an empty data object on successful deletion.
+
+### Example
+
+```bash cURL
+curl -X POST https://api.unkey.com/v2/apis.deleteApi \
+  -H "Authorization: Bearer <your-root-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiId": "api_abcd1234"
+  }'
+```
+
+```json Response
+{
+  "meta": {
+    "requestId": "req_1234abcd"
+  },
+  "data": {}
+}
+```
+
+### Error Codes
+
+- `400` - Bad request (invalid API ID format)
+- `401` - Unauthorized (missing or invalid root key)
+- `403` - Forbidden (insufficient permissions)
+- `404` - Not found (API does not exist)
+- `412` - Precondition failed (delete protection is enabled - disable protection through the dashboard or API configuration, then retry)
+- `429` - Too many requests (rate limit exceeded)
+- `500` - Internal server error
