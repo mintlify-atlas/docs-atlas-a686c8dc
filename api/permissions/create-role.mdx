@@ -1,0 +1,123 @@
+---
+title: Create Role
+description: Create a new role to group related permissions
+---
+
+Create a new role to group related permissions for easier management. Roles enable consistent permission assignment across multiple API keys.
+
+**Important**: Role names must be unique within the workspace. Once created, roles are immediately available for assignment.
+
+## Required Permissions
+
+Your root key must have the following permission:
+- `rbac.*.create_role`
+
+## Request
+
+<ParamField body="name" type="string" required>
+  The unique name for this role. Must be unique within your workspace and clearly indicate the role's purpose.
+  
+  Use descriptive names like 'admin', 'editor', or 'billing_manager'.
+  
+  **Pattern**: `^[a-zA-Z][a-zA-Z0-9._-]*$`
+  
+  **Length**: 1-512 characters
+  
+  **Examples**: `admin.billing`, `support.readonly`, `developer.api`, `manager.analytics`
+</ParamField>
+
+<ParamField body="description" type="string">
+  Provides comprehensive documentation of what this role encompasses and what access it grants.
+  
+  Include information about the intended use case, what permissions should be assigned, and any important considerations.
+  
+  This internal documentation helps team members understand role boundaries and security implications.
+  
+  Not visible to end users - designed for administration teams and access control audits.
+  
+  Consider documenting:
+  - The role's intended purpose and scope
+  - What types of users should receive this role
+  - What permissions are typically associated with it
+  - Any security considerations or limitations
+  - Related roles that might be used together
+  
+  **Max length**: 512 characters
+  
+  **Example**: `Provides read-only access for customer support representatives. Includes permissions to view user accounts, support tickets, and basic analytics. Does not include access to billing, admin functions, or data modification capabilities.`
+</ParamField>
+
+## Response
+
+<ResponseField name="roleId" type="string" required>
+  The unique identifier for the newly created role.
+  
+  Use this ID to reference the role in other API operations.
+  
+  **Example**: `role_5678efgh9012wxyz`
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/permissions.createRole \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "support.readonly",
+    "description": "Provides read-only access for customer support representatives"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.permissions.createRole({
+  name: "support.readonly",
+  description: "Provides read-only access for customer support representatives",
+});
+
+console.log(result.result?.roleId);
+```
+</CodeGroup>
+
+### Without Description
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/permissions.createRole \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "api.reader"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.permissions.createRole({
+  name: "api.reader",
+});
+
+console.log(result.result?.roleId);
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_1234abcd"
+  },
+  "data": {
+    "roleId": "role_5678efgh9012wxyz"
+  }
+}
+```

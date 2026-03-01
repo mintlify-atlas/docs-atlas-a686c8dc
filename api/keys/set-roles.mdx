@@ -1,0 +1,136 @@
+---
+title: Set Key Roles
+description: Replace all roles on a key with the specified set
+---
+
+Replace all roles on a key with the specified set in a single atomic operation.
+
+Use this to synchronize with external systems, reset roles to a known state, or apply standardized role templates. Direct permissions are never affected.
+
+**Important**: Changes take effect immediately with up to 30-second edge propagation.
+
+## Required Permissions
+
+Your root key must have one of the following permissions:
+- `api.*.update_key` (to update keys in any API)
+- `api.<api_id>.update_key` (to update keys in a specific API)
+
+## Side Effects
+
+Invalidates the key cache for immediate effect, and makes role changes available for verification within 30 seconds across all regions.
+
+## Request
+
+<ParamField body="keyId" type="string" required>
+  Specifies which key gets the complete role replacement using the database identifier returned from createKey.
+  
+  Do not confuse this with the actual API key string that users include in requests.
+  
+  This is a wholesale replacement operation that removes all existing roles not included in the request.
+  
+  Role changes take effect immediately but may take up to 30 seconds to propagate across all regions.
+  
+  **Pattern**: `^[a-zA-Z0-9_]+$`
+  
+  **Example**: `key_2cGKbMxRyIzhCxo1Idjz8q`
+</ParamField>
+
+<ParamField body="roles" type="array">
+  Replaces all existing role assignments with this complete list of roles.
+  
+  This is a wholesale replacement operation, not an incremental update like add/remove operations.
+  
+  Providing an empty array removes all direct role assignments from the key.
+  
+  All roles must already exist in the workspace - roles cannot be created automatically.
+  
+  Invalid role references cause the entire operation to fail atomically, ensuring consistent state.
+  
+  **Pattern**: `^[a-zA-Z0-9_:\-\.\*]+$`
+  
+  **Max items**: 100
+  
+  **Example**: `["editor", "viewer"]`
+</ParamField>
+
+## Response
+
+<ResponseField name="roles" type="array" required>
+  Complete list of all roles currently assigned to the key.
+  
+  This only shows direct role assignments, not inherited or nested roles.
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.setRoles \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_1234abcd",
+    "roles": ["editor", "viewer"]
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.keys.setRoles({
+  keyId: "key_1234abcd",
+  roles: ["editor", "viewer"],
+});
+
+console.log(result.result);
+```
+</CodeGroup>
+
+### Remove All Roles
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.setRoles \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_1234abcd",
+    "roles": []
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.keys.setRoles({
+  keyId: "key_1234abcd",
+  roles: [],
+});
+
+console.log(result.result);
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_abc123def456"
+  },
+  "data": [
+    {
+      "id": "role_123",
+      "name": "editor"
+    },
+    {
+      "id": "role_124",
+      "name": "viewer"
+    }
+  ]
+}
+```

@@ -1,0 +1,192 @@
+---
+title: Update Key Credits
+description: Update remaining credits for a key
+---
+
+Update credit quotas in response to plan changes, billing cycles, or usage purchases.
+
+Use this for user upgrades/downgrades, monthly quota resets, credit purchases, or promotional bonuses. Supports three operations: set, increment, or decrement credits. Set to null for unlimited usage.
+
+**Important**: Setting unlimited credits automatically clears existing refill configurations.
+
+## Required Permissions
+
+Your root key must have one of the following permissions:
+- `api.*.update_key` (to update keys in any API)
+- `api.<api_id>.update_key` (to update keys in a specific API)
+
+## Side Effects
+
+Credit updates remove the key from cache immediately. Setting credits to unlimited automatically clears any existing refill settings. Changes take effect instantly but may take up to 30 seconds to propagate to all edge regions.
+
+## Request
+
+<ParamField body="keyId" type="string" required>
+  The ID of the key to update (begins with `key_`).
+  
+  This is the database reference ID for the key, not the actual API key string that users authenticate with.
+  
+  This ID uniquely identifies which key's credits will be updated.
+  
+  **Example**: `key_2cGKbMxRyIzhCxo1Idjz8q`
+</ParamField>
+
+<ParamField body="operation" type="string" required>
+  Defines how to modify the key's remaining credits.
+  
+  Use `set` to replace current credits with a specific value or unlimited usage, `increment` to add credits for plan upgrades or credit purchases, and `decrement` to reduce credits for refunds or policy violations.
+  
+  **Options**: `set`, `increment`, `decrement`
+  
+  **Example**: `set`
+</ParamField>
+
+<ParamField body="value" type="integer">
+  The credit value to use with the specified operation.
+  
+  The meaning depends on the operation:
+  - For `set`: this becomes the new remaining credits value
+  - For `increment`: this amount is added to current credits
+  - For `decrement`: this amount is subtracted from current credits
+  
+  Set to `null` when using `set` operation to make the key unlimited (removes usage restrictions entirely).
+  
+  When decrementing, if the result would be negative, remaining credits are automatically set to zero.
+  
+  Credits are consumed during successful key verification, and when credits reach zero, verification fails with `code=USAGE_EXCEEDED`.
+  
+  Required when using `increment` or `decrement` operations. Optional for `set` operation (null creates unlimited usage).
+  
+  **Min**: 0
+  
+  **Max**: 9223372036854775807
+  
+  **Example**: `1000`
+</ParamField>
+
+## Response
+
+<ResponseField name="remaining" type="integer">
+  The updated credit balance. Null indicates unlimited usage.
+</ResponseField>
+
+<ResponseField name="refill" type="object">
+  Automatic refill configuration (if set).
+  
+  <ResponseField name="interval" type="string">
+    How often credits are refilled (`daily` or `monthly`).
+  </ResponseField>
+  
+  <ResponseField name="amount" type="integer">
+    Number of credits to add on each refill.
+  </ResponseField>
+  
+  <ResponseField name="refillDay" type="integer">
+    Day of the month for monthly refills (1-31).
+  </ResponseField>
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.updateCredits \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_1234abcd",
+    "operation": "set",
+    "value": 10000
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.keys.updateCredits({
+  keyId: "key_1234abcd",
+  operation: "set",
+  value: 10000,
+});
+
+console.log(result.result);
+```
+</CodeGroup>
+
+### Increment Credits (Purchase)
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.updateCredits \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_5678efgh",
+    "operation": "increment",
+    "value": 5000
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.keys.updateCredits({
+  keyId: "key_5678efgh",
+  operation: "increment",
+  value: 5000,
+});
+
+console.log(result.result);
+```
+</CodeGroup>
+
+### Set Unlimited Credits
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.updateCredits \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_9876wxyz",
+    "operation": "set",
+    "value": null
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.keys.updateCredits({
+  keyId: "key_9876wxyz",
+  operation: "set",
+  value: null,
+});
+
+console.log(result.result);
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_upgrade_1234"
+  },
+  "data": {
+    "remaining": 10000,
+    "refill": {
+      "interval": "monthly",
+      "amount": 10000,
+      "refillDay": 1
+    }
+  }
+}
+```

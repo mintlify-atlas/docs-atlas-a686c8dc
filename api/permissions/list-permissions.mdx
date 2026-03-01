@@ -1,0 +1,159 @@
+---
+title: List Permissions
+description: Retrieve all permissions in your workspace
+---
+
+Retrieve all permissions in your workspace.
+
+Results are paginated and sorted by their id.
+
+## Required Permissions
+
+Your root key must have the following permission:
+- `rbac.*.read_permission`
+
+## Request
+
+<ParamField body="limit" type="integer" default="100">
+  Maximum number of permissions to return in a single response.
+  
+  **Min**: 1
+  
+  **Max**: 100
+  
+  **Example**: `50`
+</ParamField>
+
+<ParamField body="cursor" type="string">
+  Pagination cursor from a previous response to fetch the next page of permissions.
+  
+  Include this value when you need to retrieve additional permissions beyond the initial response.
+  
+  Each response containing more results than the requested limit includes a cursor for subsequent pages.
+  
+  Leave empty or omit this field to start from the beginning of the permission list.
+  
+  Cursors are temporary and may expire - always handle cases where a cursor becomes invalid.
+  
+  **Max length**: 1024 characters
+  
+  **Example**: `eyJrZXkiOiJwZXJtXzEyMzQifQ==`
+</ParamField>
+
+## Response
+
+<ResponseField name="data" type="array" required>
+  Array of permission objects.
+  
+  Each permission includes:
+  - `id`: Permission identifier
+  - `name`: Permission name
+  - `slug`: URL-safe identifier
+  - `description`: Permission description (if set)
+  - `createdAt`: Creation timestamp
+  - `updatedAt`: Last update timestamp
+</ResponseField>
+
+<ResponseField name="pagination" type="object">
+  Pagination information for fetching additional results.
+  
+  <ResponseField name="cursor" type="string">
+    Token to fetch the next page of results.
+  </ResponseField>
+  
+  <ResponseField name="hasMore" type="boolean">
+    Whether more results are available.
+  </ResponseField>
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/permissions.listPermissions \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "limit": 50
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.permissions.listPermissions({
+  limit: 50,
+});
+
+console.log(result.result);
+```
+</CodeGroup>
+
+### With Pagination
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/permissions.listPermissions \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "limit": 50,
+    "cursor": "eyJrZXkiOiJwZXJtXzEyMzQifQ=="
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.permissions.listPermissions({
+  limit: 50,
+  cursor: "eyJrZXkiOiJwZXJtXzEyMzQifQ==",
+});
+
+console.log(result.result);
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_1234abcd"
+  },
+  "data": [
+    {
+      "id": "perm_123",
+      "name": "documents.read",
+      "slug": "documents-read",
+      "description": "Allows reading document resources",
+      "createdAt": 1704067200000,
+      "updatedAt": 1704067200000
+    },
+    {
+      "id": "perm_124",
+      "name": "documents.write",
+      "slug": "documents-write",
+      "description": "Allows writing document resources",
+      "createdAt": 1704067200000,
+      "updatedAt": 1704067200000
+    },
+    {
+      "id": "perm_125",
+      "name": "users.read",
+      "slug": "users-read",
+      "description": "Allows reading user information",
+      "createdAt": 1704067200000,
+      "updatedAt": 1704067200000
+    }
+  ],
+  "pagination": {
+    "cursor": "eyJrZXkiOiJwZXJtXzEyNiJ9",
+    "hasMore": true
+  }
+}
+```

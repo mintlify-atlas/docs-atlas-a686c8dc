@@ -97,9 +97,19 @@
             "pages": [
               "api/keys/create",
               "api/keys/verify",
+              "api/keys/get",
               "api/keys/update",
               "api/keys/delete",
-              "api/keys/list"
+              "api/keys/list",
+              "api/keys/reroll",
+              "api/keys/update-credits",
+              "api/keys/whoami",
+              "api/keys/add-permissions",
+              "api/keys/add-roles",
+              "api/keys/set-permissions",
+              "api/keys/set-roles",
+              "api/keys/remove-permissions",
+              "api/keys/remove-roles"
             ]
           },
           {
@@ -133,6 +143,19 @@
             "pages": [
               "api/analytics/query",
               "api/analytics/verifications"
+            ]
+          },
+          {
+            "group": "Permissions",
+            "pages": [
+              "api/permissions/create-role",
+              "api/permissions/get-role",
+              "api/permissions/list-roles",
+              "api/permissions/delete-role",
+              "api/permissions/create-permission",
+              "api/permissions/get-permission",
+              "api/permissions/list-permissions",
+              "api/permissions/delete-permission"
             ]
           }
         ]

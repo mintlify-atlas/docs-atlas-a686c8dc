@@ -1,0 +1,198 @@
+---
+title: Get API Key
+description: Retrieve detailed key information by keyId
+---
+
+Retrieve detailed key information for dashboard interfaces and administrative purposes.
+
+Use this to build key management dashboards showing users their key details, status, permissions, and usage data. You can identify keys by `keyId` or the actual key string.
+
+**Important**: Set `decrypt: true` only in secure contexts to retrieve plaintext key values from recoverable keys.
+
+## Required Permissions
+
+Your root key must have one of the following permissions for basic key information:
+- `api.*.read_key` (to read keys from any API)
+- `api.<api_id>.read_key` (to read keys from a specific API)
+
+Additional permission required for decrypt functionality:
+- `api.*.decrypt_key` or `api.<api_id>.decrypt_key`
+
+## Request
+
+<ParamField body="keyId" type="string" required>
+  Specifies which key to retrieve using the database identifier returned from `keys.createKey`.
+  Do not confuse this with the actual API key string that users include in requests.
+  
+  Key data includes metadata, permissions, usage statistics, and configuration but never the plaintext key value unless `decrypt=true`.
+  
+  Find this ID in creation responses, key listings, dashboard, or verification responses.
+  
+  **Pattern**: `^[a-zA-Z0-9_]+$`
+  
+  **Example**: `key_1234abcd`
+</ParamField>
+
+<ParamField body="decrypt" type="boolean" default="false">
+  Controls whether to include the plaintext key value in the response for recovery purposes.
+  
+  Only works for keys created with `recoverable=true` and requires the `decrypt_key` permission.
+  
+  Returned keys must be handled securely, never logged, cached, or stored insecurely.
+  
+  Use only for legitimate recovery scenarios like user password resets or emergency access. Most applications should keep this false to maintain security best practices and avoid accidental key exposure.
+  
+  Decryption requests are audited and may trigger security alerts in enterprise environments.
+</ParamField>
+
+## Response
+
+<ResponseField name="keyId" type="string" required>
+  The unique identifier for this key in Unkey's system.
+</ResponseField>
+
+<ResponseField name="start" type="string">
+  The prefix of the key for visual identification.
+</ResponseField>
+
+<ResponseField name="enabled" type="boolean">
+  Whether the key is currently active.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Human-readable name for the key.
+</ResponseField>
+
+<ResponseField name="plaintext" type="string">
+  The full plaintext key value (only when `decrypt=true` and key is recoverable).
+</ResponseField>
+
+<ResponseField name="createdAt" type="integer">
+  Unix timestamp in milliseconds when the key was created.
+</ResponseField>
+
+<ResponseField name="expires" type="integer">
+  Unix timestamp in milliseconds when the key expires (if set).
+</ResponseField>
+
+<ResponseField name="meta" type="object">
+  Custom metadata attached to the key.
+</ResponseField>
+
+<ResponseField name="permissions" type="array">
+  Array of permission strings assigned to the key.
+</ResponseField>
+
+<ResponseField name="roles" type="array">
+  Array of role names assigned to the key.
+</ResponseField>
+
+<ResponseField name="credits" type="object">
+  Credit balance and refill configuration.
+  
+  <ResponseField name="remaining" type="integer">
+    Current credit balance.
+  </ResponseField>
+  
+  <ResponseField name="refill" type="object">
+    Automatic refill settings.
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="ratelimits" type="array">
+  Array of rate limit configurations attached to the key.
+</ResponseField>
+
+<ResponseField name="identity" type="object">
+  Identity information if the key is associated with an identity.
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.getKey \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_1234abcd"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.keys.get({
+  keyId: "key_1234abcd",
+});
+
+console.log(result);
+```
+</CodeGroup>
+
+### With Decryption
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.getKey \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_5678efgh",
+    "decrypt": true
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.keys.get({
+  keyId: "key_5678efgh",
+  decrypt: true,
+});
+
+console.log(result.result?.plaintext);
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_1234abcd"
+  },
+  "data": {
+    "keyId": "key_1234abcd",
+    "start": "sk_prod",
+    "enabled": true,
+    "name": "Production API Key",
+    "createdAt": 1704067200000,
+    "expires": 1735689600000,
+    "meta": {
+      "plan": "premium",
+      "userId": "user_5678",
+      "environment": "production"
+    },
+    "permissions": [
+      "documents.read",
+      "documents.write"
+    ],
+    "roles": [
+      "editor"
+    ],
+    "credits": {
+      "remaining": 8500,
+      "refill": {
+        "amount": 10000,
+        "interval": "monthly",
+        "refillDay": 1
+      }
+    }
+  }
+}
+```

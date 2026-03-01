@@ -1,0 +1,111 @@
+---
+title: Get Role
+description: Retrieve details about a specific role
+---
+
+Retrieve details about a specific role including its assigned permissions.
+
+## Required Permissions
+
+Your root key must have the following permission:
+- `rbac.*.read_role`
+
+## Request
+
+<ParamField body="role" type="string" required>
+  Unique identifier of the role to retrieve.
+  
+  Must either be a valid role ID that begins with 'role_' or the given role name and exists within your workspace.
+  
+  Use this endpoint to verify role details, check its current permissions, or retrieve metadata.
+  
+  Returns complete role information including all assigned permissions for comprehensive access review.
+  
+  **Pattern**: `^[a-zA-Z0-9_:\-\.\*]+$`
+  
+  **Length**: 3-255 characters
+  
+  **Example**: `role_1234567890abcdef` or `admin.billing`
+</ParamField>
+
+## Response
+
+<ResponseField name="id" type="string" required>
+  The unique identifier for this role.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  The role name.
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Description of what this role grants access to.
+</ResponseField>
+
+<ResponseField name="permissions" type="array">
+  Array of permissions assigned to this role.
+  
+  Each permission includes:
+  - `id`: Permission identifier
+  - `name`: Permission name
+</ResponseField>
+
+<ResponseField name="createdAt" type="integer">
+  Unix timestamp in milliseconds when the role was created.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="integer">
+  Unix timestamp in milliseconds when the role was last updated.
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/permissions.getRole \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "role": "role_1234567890abcdef"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.permissions.getRole({
+  role: "role_1234567890abcdef",
+});
+
+console.log(result.result);
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_1234abcd"
+  },
+  "data": {
+    "id": "role_1234567890abcdef",
+    "name": "admin.billing",
+    "description": "Full access to billing and subscription management",
+    "permissions": [
+      {
+        "id": "perm_123",
+        "name": "billing.read"
+      },
+      {
+        "id": "perm_124",
+        "name": "billing.write"
+      }
+    ],
+    "createdAt": 1704067200000,
+    "updatedAt": 1704153600000
+  }
+}
+```

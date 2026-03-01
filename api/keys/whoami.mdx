@@ -1,0 +1,136 @@
+---
+title: Get Key by Hash
+description: Get information about the authenticated key
+---
+
+Find out what key this is.
+
+Use this endpoint to retrieve key information when you have the actual key string but not the keyId. This is useful for support scenarios, debugging, or when users need to look up their own key details.
+
+## Required Permissions
+
+Your root key must have one of the following permissions for basic key information:
+- `api.*.read_key` (to read keys from any API)
+- `api.<api_id>.read_key` (to read keys from a specific API)
+
+**Important**: If your root key lacks permissions but the key exists, we may return a 404 status here to prevent leaking the existence of a key to unauthorized clients. If you believe that a key should exist, but receive a 404, please double check your root key has the correct permissions.
+
+## Request
+
+<ParamField body="key" type="string" required>
+  The complete API key string provided by you, including any prefix.
+  
+  Never log, cache, or store API keys in your system as they provide full access to user resources.
+  
+  Include the full key exactly as provided - even minor modifications will cause a not found error.
+  
+  **Example**: `sk_1234abcdef5678`
+</ParamField>
+
+## Response
+
+<ResponseField name="keyId" type="string" required>
+  The unique identifier for this key in Unkey's system.
+</ResponseField>
+
+<ResponseField name="start" type="string">
+  The prefix of the key for visual identification.
+</ResponseField>
+
+<ResponseField name="enabled" type="boolean">
+  Whether the key is currently active.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Human-readable name for the key.
+</ResponseField>
+
+<ResponseField name="createdAt" type="integer">
+  Unix timestamp in milliseconds when the key was created.
+</ResponseField>
+
+<ResponseField name="expires" type="integer">
+  Unix timestamp in milliseconds when the key expires (if set).
+</ResponseField>
+
+<ResponseField name="meta" type="object">
+  Custom metadata attached to the key.
+</ResponseField>
+
+<ResponseField name="permissions" type="array">
+  Array of permission strings assigned to the key.
+</ResponseField>
+
+<ResponseField name="roles" type="array">
+  Array of role names assigned to the key.
+</ResponseField>
+
+<ResponseField name="credits" type="object">
+  Credit balance and refill configuration.
+</ResponseField>
+
+<ResponseField name="ratelimits" type="array">
+  Array of rate limit configurations attached to the key.
+</ResponseField>
+
+<ResponseField name="identity" type="object">
+  Identity information if the key is associated with an identity.
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.whoami \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "key": "sk_1234abcdef5678"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.keys.whoami({
+  key: "sk_1234abcdef5678",
+});
+
+console.log(result);
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_1234abcd"
+  },
+  "data": {
+    "keyId": "key_1234abcd",
+    "start": "sk_prod",
+    "enabled": true,
+    "name": "Production API Key",
+    "createdAt": 1704067200000,
+    "expires": 1735689600000,
+    "meta": {
+      "plan": "premium",
+      "userId": "user_5678",
+      "environment": "production"
+    },
+    "permissions": [
+      "documents.read",
+      "documents.write"
+    ],
+    "roles": [
+      "editor"
+    ],
+    "credits": {
+      "remaining": 8500
+    }
+  }
+}
+```

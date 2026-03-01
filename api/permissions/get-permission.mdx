@@ -1,0 +1,94 @@
+---
+title: Get Permission
+description: Retrieve details about a specific permission
+---
+
+Retrieve details about a specific permission including its name, description, and metadata.
+
+## Required Permissions
+
+Your root key must have the following permission:
+- `rbac.*.read_permission`
+
+## Request
+
+<ParamField body="permission" type="string" required>
+  The unique identifier of the permission to retrieve.
+  
+  Must be a valid permission ID that begins with 'perm_' and exists within your workspace.
+  
+  **Pattern**: `^[a-zA-Z][a-zA-Z0-9._-]*$`
+  
+  **Length**: 3-255 characters
+  
+  **Example**: `perm_1234567890abcdef`
+</ParamField>
+
+## Response
+
+<ResponseField name="id" type="string" required>
+  The unique identifier for this permission.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  The permission name.
+</ResponseField>
+
+<ResponseField name="slug" type="string">
+  URL-safe identifier for the permission.
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Description of what this permission grants access to.
+</ResponseField>
+
+<ResponseField name="createdAt" type="integer">
+  Unix timestamp in milliseconds when the permission was created.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="integer">
+  Unix timestamp in milliseconds when the permission was last updated.
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/permissions.getPermission \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "permission": "perm_1234567890abcdef"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.permissions.getPermission({
+  permission: "perm_1234567890abcdef",
+});
+
+console.log(result.result);
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_1234abcd"
+  },
+  "data": {
+    "id": "perm_1234567890abcdef",
+    "name": "documents.read",
+    "slug": "documents-read",
+    "description": "Allows reading document resources",
+    "createdAt": 1704067200000,
+    "updatedAt": 1704067200000
+  }
+}
+```

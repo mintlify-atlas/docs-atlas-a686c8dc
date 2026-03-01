@@ -1,0 +1,160 @@
+---
+title: Reroll Key
+description: Generate new key while keeping metadata
+---
+
+Generate a new API key while preserving the configuration from an existing key.
+
+This operation creates a fresh key with a new token while maintaining all settings from the original key:
+- Permissions and roles
+- Custom metadata
+- Rate limit configurations
+- Identity associations
+- Remaining credits
+- Recovery settings
+
+## Key Generation
+
+- The system attempts to extract the prefix from the original key
+- If prefix extraction fails, the default API prefix is used
+- Key length follows the API's default byte configuration (or 16 bytes if not specified)
+
+## Original Key Handling
+
+- The original key will be revoked after the duration specified in `expiration`
+- Set `expiration` to 0 to revoke immediately
+- This allows for graceful key rotation with an overlap period
+
+## Common Use Cases
+
+- Rotating keys for security compliance
+- Issuing replacement keys for compromised credentials
+- Creating backup keys with identical permissions
+
+**Important**: Analytics and usage metrics are tracked at both the key level AND identity level. If the original key has an identity, the new key will inherit it, allowing you to track usage across both individual keys and the overall identity.
+
+## Required Permissions
+
+Your root key must have:
+- `api.*.create_key` or `api.<api_id>.create_key`
+- `api.*.encrypt_key` or `api.<api_id>.encrypt_key` (only when the original key is recoverable)
+
+## Request
+
+<ParamField body="keyId" type="string" required>
+  The database identifier of the key to reroll.
+  
+  This is the unique ID returned when creating or listing keys, NOT the actual API key token.
+  
+  You can find this ID in:
+  - The response from `keys.createKey`
+  - Key verification responses
+  - The Unkey dashboard
+  - API key listing endpoints
+  
+  **Pattern**: `^[a-zA-Z0-9_]+$`
+  
+  **Example**: `key_2cGKbMxRyIzhCxo1Idjz8q`
+</ParamField>
+
+<ParamField body="expiration" type="integer" required>
+  Duration in milliseconds until the ORIGINAL key is revoked, starting from now.
+  
+  This parameter controls the overlap period for key rotation:
+  - Set to `0` to revoke the original key immediately
+  - Positive values keep the original key active for the specified duration
+  - Allows graceful migration by giving users time to update their credentials
+  
+  **Common overlap periods**:
+  - Immediate revocation: `0`
+  - 1 hour grace period: `3600000`
+  - 24 hours grace period: `86400000`
+  - 7 days grace period: `604800000`
+  - 30 days grace period: `2592000000`
+  
+  **Min**: 0
+  
+  **Max**: 4102444800000
+  
+  **Example**: `86400000`
+</ParamField>
+
+## Response
+
+<ResponseField name="keyId" type="string" required>
+  The unique identifier for the new key in Unkey's system.
+</ResponseField>
+
+<ResponseField name="key" type="string" required>
+  The full generated API key that should be securely provided to your user.
+  
+  **SECURITY WARNING**: This is the only time you'll receive the complete key. Provide it directly to your end user via secure channels.
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.rerollKey \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_1234abcd",
+    "expiration": 86400000
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.keys.reroll({
+  keyId: "key_1234abcd",
+  expiration: 86400000, // 24 hours
+});
+
+console.log(result.result?.key); // Store this securely!
+```
+</CodeGroup>
+
+### Immediate Revocation
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.rerollKey \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_1234abcd",
+    "expiration": 0
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.keys.reroll({
+  keyId: "key_1234abcd",
+  expiration: 0, // Immediate revocation
+});
+
+console.log(result.result?.key);
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_abc123def456"
+  },
+  "data": {
+    "keyId": "key_2cGKbMxRyIzhCxo1Idjz8q",
+    "key": "prod_2cGKbMxRjIzhCxo1IdjH3arELti7Sdyc8w6XYbvtcyuBowPT"
+  }
+}
+```

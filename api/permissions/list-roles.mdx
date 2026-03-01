@@ -1,0 +1,173 @@
+---
+title: List Roles
+description: Retrieve all roles in your workspace
+---
+
+Retrieve all roles in your workspace including their assigned permissions.
+
+Results are paginated and sorted by their id.
+
+## Required Permissions
+
+Your root key must have the following permission:
+- `rbac.*.read_role`
+
+## Request
+
+<ParamField body="limit" type="integer" default="100">
+  Maximum number of roles to return in a single response.
+  
+  Use smaller values for faster response times and better UI performance.
+  
+  Use larger values when you need to process many roles efficiently.
+  
+  Results exceeding this limit will be paginated with a cursor for continuation.
+  
+  **Min**: 1
+  
+  **Max**: 100
+  
+  **Example**: `50`
+</ParamField>
+
+<ParamField body="cursor" type="string">
+  Pagination cursor from a previous response to fetch the next page of roles.
+  
+  Include this when you need to retrieve additional roles beyond the first page.
+  
+  Each response containing more results will include a cursor value that can be used here.
+  
+  Leave empty or omit this field to start from the beginning of the role list.
+  
+  **Max length**: 1024 characters
+  
+  **Example**: `eyJrZXkiOiJyb2xlXzEyMzQifQ==`
+</ParamField>
+
+## Response
+
+<ResponseField name="data" type="array" required>
+  Array of role objects.
+  
+  Each role includes:
+  - `id`: Role identifier
+  - `name`: Role name
+  - `description`: Role description (if set)
+  - `permissions`: Array of assigned permissions
+  - `createdAt`: Creation timestamp
+  - `updatedAt`: Last update timestamp
+</ResponseField>
+
+<ResponseField name="pagination" type="object">
+  Pagination information for fetching additional results.
+  
+  <ResponseField name="cursor" type="string">
+    Token to fetch the next page of results.
+  </ResponseField>
+  
+  <ResponseField name="hasMore" type="boolean">
+    Whether more results are available.
+  </ResponseField>
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/permissions.listRoles \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "limit": 50
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.permissions.listRoles({
+  limit: 50,
+});
+
+console.log(result.result);
+```
+</CodeGroup>
+
+### With Pagination
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/permissions.listRoles \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "limit": 50,
+    "cursor": "eyJrZXkiOiJyb2xlXzEyMzQifQ=="
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.permissions.listRoles({
+  limit: 50,
+  cursor: "eyJrZXkiOiJyb2xlXzEyMzQifQ==",
+});
+
+console.log(result.result);
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_1234abcd"
+  },
+  "data": [
+    {
+      "id": "role_123",
+      "name": "admin",
+      "description": "Full administrative access",
+      "permissions": [
+        {
+          "id": "perm_123",
+          "name": "admin.read"
+        },
+        {
+          "id": "perm_124",
+          "name": "admin.write"
+        }
+      ],
+      "createdAt": 1704067200000,
+      "updatedAt": 1704153600000
+    },
+    {
+      "id": "role_124",
+      "name": "editor",
+      "description": "Content editing permissions",
+      "permissions": [
+        {
+          "id": "perm_125",
+          "name": "content.read"
+        },
+        {
+          "id": "perm_126",
+          "name": "content.write"
+        }
+      ],
+      "createdAt": 1704067200000,
+      "updatedAt": 1704067200000
+    }
+  ],
+  "pagination": {
+    "cursor": "eyJrZXkiOiJyb2xlXzEyNSJ9",
+    "hasMore": true
+  }
+}
+```

@@ -1,0 +1,121 @@
+---
+title: Add Key Roles
+description: Add roles to a key without affecting existing roles or permissions
+---
+
+Add roles to a key without affecting existing roles or permissions.
+
+Use this for privilege upgrades, enabling new feature sets, or subscription changes that grant additional role-based capabilities. Direct permissions remain unchanged.
+
+**Important**: Changes take effect immediately with up to 30-second edge propagation.
+
+## Required Permissions
+
+Your root key must have one of the following permissions:
+- `api.*.update_key` (to update keys in any API)
+- `api.<api_id>.update_key` (to update keys in a specific API)
+
+## Side Effects
+
+Invalidates the key cache for immediate effect, and makes role assignments available for verification within 30 seconds across all regions.
+
+## Request
+
+<ParamField body="keyId" type="string" required>
+  Specifies which key receives the additional roles using the database identifier returned from `createKey`.
+  
+  Do not confuse this with the actual API key string that users include in requests.
+  
+  Added roles supplement existing roles and permissions without replacing them.
+  
+  Role assignments take effect immediately but may take up to 30 seconds to propagate across all regions.
+  
+  **Pattern**: `^[a-zA-Z0-9_]+$`
+  
+  **Example**: `key_2cGKbMxRyIzhCxo1Idjz8q`
+</ParamField>
+
+<ParamField body="roles" type="array" required>
+  Assigns additional roles to the key through direct assignment to existing workspace roles.
+  
+  Operations are idempotent - adding existing roles has no effect and causes no errors.
+  
+  All roles must already exist in the workspace - roles cannot be created automatically.
+  
+  Invalid roles cause the entire operation to fail atomically, ensuring consistent state.
+  
+  **Pattern**: `^[a-zA-Z][a-zA-Z0-9._-]*$`
+  
+  **Min items**: 1
+  
+  **Max items**: 100
+  
+  **Example**: `["editor", "viewer"]`
+</ParamField>
+
+## Response
+
+<ResponseField name="roles" type="array" required>
+  Complete list of all roles directly assigned to the key after the operation completes.
+  
+  The response includes:
+  - All roles now assigned to the key (both pre-existing and newly added)
+  - Both ID and name of each role for easy reference
+  
+  **Important notes**:
+  - The response shows the complete current state after the addition
+  - An empty array means the key has no roles assigned (unlikely after an add operation)
+  - This only shows direct role assignments, not inherited or nested roles
+  - Role permissions are not expanded in this response - use keys.getKey for full details
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/keys.addRoles \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyId": "key_1234abcd",
+    "roles": ["editor", "viewer"]
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.keys.addRoles({
+  keyId: "key_1234abcd",
+  roles: ["editor", "viewer"],
+});
+
+console.log(result.result);
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_abc123def456"
+  },
+  "data": [
+    {
+      "id": "role_123",
+      "name": "editor"
+    },
+    {
+      "id": "role_124",
+      "name": "viewer"
+    },
+    {
+      "id": "role_125",
+      "name": "admin"
+    }
+  ]
+}
+```

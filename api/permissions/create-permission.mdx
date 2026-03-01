@@ -1,0 +1,150 @@
+---
+title: Create Permission
+description: Create a new permission to define specific actions or capabilities
+---
+
+Create a new permission to define specific actions or capabilities in your RBAC system. Permissions can be assigned directly to API keys or included in roles.
+
+Use hierarchical naming patterns like `documents.read`, `admin.users.delete`, or `billing.invoices.create` for clear organization.
+
+**Important**: Permission names must be unique within the workspace. Once created, permissions are immediately available for assignment.
+
+## Required Permissions
+
+Your root key must have the following permission:
+- `rbac.*.create_permission`
+
+## Request
+
+<ParamField body="name" type="string" required>
+  Creates a permission with this human-readable name that describes its purpose.
+  
+  Names must be unique within your workspace to prevent conflicts during assignment.
+  
+  Use clear, semantic names that developers can easily understand when building authorization logic.
+  
+  Consider using hierarchical naming conventions like 'resource.action' for better organization.
+  
+  **Length**: 1-512 characters
+  
+  **Examples**: `users.read`, `billing.write`, `analytics.view`, `admin.manage`
+</ParamField>
+
+<ParamField body="slug" type="string" required>
+  Creates a URL-safe identifier for this permission that can be used in APIs and integrations.
+  
+  Must start with a letter and contain only letters, numbers, periods, underscores, and hyphens.
+  
+  Slugs are often used in REST endpoints, configuration files, and external integrations.
+  
+  Should closely match the name but in a format suitable for technical usage.
+  
+  Must be unique within your workspace to ensure reliable permission lookups.
+  
+  Keep slugs concise but descriptive for better developer experience.
+  
+  **Pattern**: `^[a-zA-Z][a-zA-Z0-9._-]*$`
+  
+  **Length**: 1-128 characters
+  
+  **Example**: `users-read`
+</ParamField>
+
+<ParamField body="description" type="string">
+  Provides detailed documentation of what this permission grants access to.
+  
+  Include information about affected resources, allowed actions, and any important limitations.
+  
+  This internal documentation helps team members understand permission scope and security implications.
+  
+  Not visible to end users - designed for development teams and security audits.
+  
+  Consider documenting:
+  - What resources can be accessed
+  - What operations are permitted
+  - Any conditions or limitations
+  - Related permissions that might be needed
+  
+  **Max length**: 512 characters
+  
+  **Example**: `Grants read-only access to user profile information, account settings, and subscription status.`
+</ParamField>
+
+## Response
+
+<ResponseField name="permissionId" type="string" required>
+  The unique identifier for the newly created permission.
+  
+  Use this ID to reference the permission in other API operations.
+  
+  **Example**: `perm_5678efgh9012wxyz`
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/permissions.createPermission \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "documents.read",
+    "slug": "documents-read",
+    "description": "Allows reading document resources"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.permissions.createPermission({
+  name: "documents.read",
+  slug: "documents-read",
+  description: "Allows reading document resources",
+});
+
+console.log(result.result?.permissionId);
+```
+</CodeGroup>
+
+### Without Description
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/permissions.createPermission \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "files.upload",
+    "slug": "files-upload"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.permissions.createPermission({
+  name: "files.upload",
+  slug: "files-upload",
+});
+
+console.log(result.result?.permissionId);
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_1234abcd"
+  },
+  "data": {
+    "permissionId": "perm_5678efgh9012wxyz"
+  }
+}
+```

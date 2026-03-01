@@ -1,0 +1,82 @@
+---
+title: Delete Role
+description: Remove a role from your workspace
+---
+
+Remove a role from your workspace. This also removes the role from all assigned API keys.
+
+**Important**: This operation cannot be undone and immediately affects all API keys that had this role assigned.
+
+## Required Permissions
+
+Your root key must have the following permission:
+- `rbac.*.delete_role`
+
+## Request
+
+<ParamField body="role" type="string" required>
+  Unique identifier of the role to permanently delete from your workspace.
+  
+  Must either be a valid role ID that begins with 'role_' or the given role name and exists within your workspace.
+  
+  **WARNING**: Deletion is immediate and irreversible with significant consequences:
+  - All API keys assigned this role will lose the associated permissions
+  - Access to resources protected by this role's permissions will be denied
+  - Any authorization logic depending on this role will start failing
+  - Historical analytics referencing this role remain intact
+  
+  Before deletion, ensure:
+  - You've updated any dependent authorization logic or code
+  - You've migrated any keys to use alternative roles or direct permissions
+  - You've notified relevant team members of the access changes
+  
+  **Pattern**: `^[a-zA-Z0-9_:\-\.\*]+$`
+  
+  **Length**: 3-255 characters
+  
+  **Example**: `role_dns_manager` or `admin.billing`
+</ParamField>
+
+## Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates whether the role was successfully deleted.
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.unkey.com/v2/permissions.deleteRole \
+  -H "Authorization: Bearer <UNKEY_ROOT_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "role": "role_dns_manager"
+  }'
+```
+
+```typescript TypeScript
+import { Unkey } from "@unkey/api";
+
+const unkey = new Unkey({ token: process.env.UNKEY_ROOT_KEY });
+
+const result = await unkey.permissions.deleteRole({
+  role: "role_dns_manager",
+});
+
+console.log(result.result);
+```
+</CodeGroup>
+
+## Response Example
+
+```json
+{
+  "meta": {
+    "requestId": "req_1234abcd"
+  },
+  "data": {
+    "success": true
+  }
+}
+```
