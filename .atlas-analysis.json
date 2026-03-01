@@ -1,0 +1,172 @@
+{
+  "projectType": "saas",
+  "projectName": "Unkey",
+  "projectDescription": "Open-source API authentication, authorization, and rate limiting platform for modern APIs",
+  "theme": "palm",
+  "primaryColor": "#7c3aed",
+  "lightColor": "#a78bfa",
+  "darkColor": "#5b21b6",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "glossary"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/api-keys",
+              "features/rate-limiting",
+              "features/identities",
+              "features/analytics",
+              "features/audit-logs"
+            ]
+          },
+          {
+            "group": "Integration Guides",
+            "pages": [
+              "guides/nextjs",
+              "guides/express",
+              "guides/hono",
+              "guides/go",
+              "guides/python",
+              "guides/cloudflare-workers"
+            ]
+          },
+          {
+            "group": "Advanced Topics",
+            "pages": [
+              "advanced/authorization",
+              "advanced/usage-limits",
+              "advanced/key-expiration",
+              "advanced/rate-limit-overrides",
+              "advanced/multi-tenant"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "security/overview",
+              "security/root-keys",
+              "security/key-recovery",
+              "security/delete-protection"
+            ]
+          },
+          {
+            "group": "Platform",
+            "pages": [
+              "platform/architecture",
+              "platform/deployments",
+              "platform/self-hosting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/introduction",
+              "api/authentication",
+              "api/errors"
+            ]
+          },
+          {
+            "group": "Keys",
+            "pages": [
+              "api/keys/create",
+              "api/keys/verify",
+              "api/keys/update",
+              "api/keys/delete",
+              "api/keys/list"
+            ]
+          },
+          {
+            "group": "APIs",
+            "pages": [
+              "api/apis/create",
+              "api/apis/get",
+              "api/apis/delete",
+              "api/apis/list-keys"
+            ]
+          },
+          {
+            "group": "Rate Limiting",
+            "pages": [
+              "api/ratelimit/limit",
+              "api/ratelimit/overrides"
+            ]
+          },
+          {
+            "group": "Identities",
+            "pages": [
+              "api/identities/create",
+              "api/identities/get",
+              "api/identities/update",
+              "api/identities/delete",
+              "api/identities/list"
+            ]
+          },
+          {
+            "group": "Analytics",
+            "pages": [
+              "api/analytics/query",
+              "api/analytics/verifications"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "SDKs",
+        "groups": [
+          {
+            "group": "Official SDKs",
+            "pages": [
+              "sdks/overview",
+              "sdks/typescript",
+              "sdks/go",
+              "sdks/python"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "API key creation, verification, and revocation with metadata and expiration",
+    "Rate limiting with per-key, per-user, and per-endpoint limits",
+    "Identity management for multi-tenant applications",
+    "Usage tracking and analytics with credit limits and refills",
+    "Role-based access control (RBAC) with permissions and roles",
+    "Audit logging for compliance and security",
+    "Global edge deployment with low-latency verification"
+  ],
+  "publicApiSurface": [
+    "/v2/keys.create - Create a new API key",
+    "/v2/keys.verify - Verify an API key",
+    "/v2/keys.update - Update key metadata or settings",
+    "/v2/keys.delete - Revoke an API key",
+    "/v2/keys.list - List keys for an API",
+    "/v2/keys.addPermissions - Add permissions to a key",
+    "/v2/keys.addRoles - Add roles to a key",
+    "/v2/apis.create - Create a new API",
+    "/v2/apis.get - Get API details",
+    "/v2/apis.delete - Delete an API",
+    "/v2/ratelimit.limit - Check and decrement rate limit",
+    "/v2/identities.create - Create an identity",
+    "/v2/identities.get - Get identity details",
+    "/v2/identities.update - Update identity metadata",
+    "/v2/identities.delete - Delete an identity",
+    "/v2/identities.list - List identities",
+    "/v2/analytics.getVerifications - Query verification analytics"
+  ]
+}
